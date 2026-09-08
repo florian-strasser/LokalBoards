@@ -11,7 +11,8 @@ export type CardActivityType =
   | "status"
   | "moved"
   | "assigned"
-  | "due";
+  | "due"
+  | "labels";
 
 export async function recordCardActivity(
   card: number | string,

@@ -390,6 +390,27 @@ const activityText = (a: any): string => {
                       }),
                   })
                 : $t("activityDueCleared");
+        case "labels": {
+            const added = (d.added || []).join(", ");
+            const removed = (d.removed || []).join(", ");
+            // One word out and one word in is a rewording — which is what it
+            // is, since rewording a label on a card points that card at a
+            // different one. Saying so beats two lines contradicting each
+            // other.
+            if (d.added?.length === 1 && d.removed?.length === 1)
+                return $t("activityLabelsReplaced", {
+                    from: removed,
+                    to: added,
+                });
+            if (added && removed)
+                return `${$t("activityLabelsAdded", { labels: added })} · ${$t(
+                    "activityLabelsRemoved",
+                    { labels: removed },
+                )}`;
+            return added
+                ? $t("activityLabelsAdded", { labels: added })
+                : $t("activityLabelsRemoved", { labels: removed });
+        }
         default:
             return a.type;
     }

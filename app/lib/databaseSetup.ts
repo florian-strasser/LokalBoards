@@ -1100,6 +1100,84 @@ const migrations: Migration[] = [
     },
   },
 
+  // Labels: a small named, coloured set per board, and which cards wear them.
+  //
+  // Per board rather than per instance, because "Blocked" on one board and
+  // "Blocked" on another are rarely the same thing, and a shared list would
+  // grow to hold everybody's. It also means a board carries its own vocabulary
+  // when it is duplicated or handed over.
+  //
+  // No foreign keys, as everywhere else here: rows are cleaned up where they
+  // are deleted, and the orphan-sweeping migrations above are the safety net.
+  {
+    id: "0025_card_labels",
+    up: async (db) => {
+      await db.execute(`CREATE TABLE IF NOT EXISTS \`labels\` (
+        \`id\` int NOT NULL AUTO_INCREMENT,
+        \`board\` int NOT NULL,
+        \`name\` varchar(64) COLLATE utf8mb4_general_ci NOT NULL,
+        \`color\` varchar(7) COLLATE utf8mb4_general_ci NOT NULL,
+        \`sort\` int NOT NULL DEFAULT '0',
+        PRIMARY KEY (\`id\`),
+        KEY \`labels_board\` (\`board\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;`);
+
+      // The pair is the key: a card wears a label once or not at all, and the
+      // second index is what makes "every card with this label" cheap, which
+      // is the whole point of filtering by one.
+      await db.execute(`CREATE TABLE IF NOT EXISTS \`card_labels\` (
+        \`card\` int NOT NULL,
+        \`label\` int NOT NULL,
+        PRIMARY KEY (\`card\`, \`label\`),
+        KEY \`card_labels_label\` (\`label\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;`);
+    },
+  },
+
+  {
+    // One name, one label — per board.
+    //
+    // A label started out as a board's vocabulary: a list you kept and switched
+    // on and off per card. That is not what it is any more. A label is a word
+    // typed on a card, and the row in `labels` exists only so the same word
+    // typed on two cards is one thing — which is what makes a tile, a filter and
+    // the list of names offered when adding one all agree.
+    //
+    // The index is that rule written down. Without it two people typing "Bug" at
+    // the same moment on the same board get a label each, and the board quietly
+    // holds two of everything.
+    id: "0026_label_names_unique",
+    up: async (db) => {
+      // Anything already duplicated is collapsed onto the oldest of its name,
+      // and the cards wearing the others are moved across. `UPDATE IGNORE`
+      // covers the card that wore both: its row for the survivor already
+      // exists, so the move is dropped and the delete below clears the rest.
+      const [duplicated]: any = await db.execute(
+        "SELECT `board`, `name`, MIN(`id`) AS keeper FROM `labels` GROUP BY `board`, `name` HAVING COUNT(*) > 1",
+      );
+      for (const group of duplicated as any[]) {
+        const [extras]: any = await db.execute(
+          "SELECT `id` FROM `labels` WHERE `board` = ? AND `name` = ? AND `id` <> ?",
+          [group.board, group.name, group.keeper],
+        );
+        for (const extra of extras as any[]) {
+          await db.execute(
+            "UPDATE IGNORE `card_labels` SET `label` = ? WHERE `label` = ?",
+            [group.keeper, extra.id],
+          );
+          await db.execute("DELETE FROM `card_labels` WHERE `label` = ?", [
+            extra.id,
+          ]);
+          await db.execute("DELETE FROM `labels` WHERE `id` = ?", [extra.id]);
+        }
+      }
+
+      await db.execute(
+        "ALTER TABLE `labels` ADD UNIQUE KEY `labels_board_name` (`board`, `name`)",
+      );
+    },
+  },
+
   // To add a further schema change, append a new migration here, e.g.:
   // {
   //   id: "0015_add_x",

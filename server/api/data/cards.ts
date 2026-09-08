@@ -100,6 +100,20 @@ export default defineEventHandler(async (event) => {
             `SELECT card, minutesBefore FROM card_reminders WHERE card IN (${placeholders}) ORDER BY minutesBefore ASC`,
             cardIds,
           );
+          // Labels for every card on the board in one query, so a tile can
+          // draw its chips without the board making a request per card.
+          const [labelRows] = await db.execute(
+            `SELECT cl.card AS card, l.id, l.name
+               FROM \`card_labels\` cl JOIN \`labels\` l ON l.id = cl.label
+              WHERE cl.card IN (${placeholders}) ORDER BY l.sort ASC, l.id ASC`,
+            cardIds,
+          );
+          const labelsByCard = new Map();
+          for (const row of labelRows) {
+            if (!labelsByCard.has(row.card)) labelsByCard.set(row.card, []);
+            labelsByCard.get(row.card).push({ id: row.id, name: row.name });
+          }
+
           const remindersByCard = new Map();
           for (const row of reminderRows) {
             if (!remindersByCard.has(row.card))
@@ -139,6 +153,7 @@ export default defineEventHandler(async (event) => {
             card.comments = commentsByCard.get(card.id) || [];
             card.attachments = attachmentsByCard.get(card.id) || [];
             card.reminders = remindersByCard.get(card.id) || [];
+            card.labels = labelsByCard.get(card.id) || [];
           }
         }
 

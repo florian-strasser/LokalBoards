@@ -24,6 +24,19 @@
                 </h3>
             </div>
         </div>
+        <!-- Labels sit on their own line under the name, indented to the same
+             gutter as the counts below: what the card is, before what it has. -->
+        <div
+            v-if="props.card.labels?.length"
+            class="pl-8 mt-1 flex flex-wrap gap-1"
+        >
+            <span
+                v-for="label in props.card.labels"
+                :key="label.id"
+                class="label-pill"
+                >{{ label.name }}</span
+            >
+        </div>
         <div
             v-if="
                 props.card.commentCount ||

@@ -1,5 +1,6 @@
 import { defineEventHandler, readBody, getQuery } from "h3";
 import { setupDatabase } from "../../../app/lib/databaseSetup";
+import { pruneUnusedLabels } from "../../utils/labelCleanup";
 import { dispatchWebhooks } from "../../utils/webhooks";
 import { getServerSocket } from "../../utils/socket";
 
@@ -95,6 +96,16 @@ export default defineEventHandler(async (event) => {
           [cardId],
         );
         card.reminders = (reminderRows as any[]).map((r) => r.minutesBefore);
+
+        // The labels themselves, not just their ids: they are what the card
+        // shows and what it hands back to the tile behind it.
+        const [labelRows]: any = await db.execute(
+          `SELECT l.id, l.name
+             FROM \`card_labels\` cl JOIN \`labels\` l ON l.id = cl.label
+            WHERE cl.card = ? ORDER BY l.sort ASC, l.id ASC`,
+          [cardId],
+        );
+        card.labels = labelRows;
 
         return { card, attachments };
       }
@@ -217,7 +228,7 @@ export default defineEventHandler(async (event) => {
       }
     } else if (method === "PUT") {
       // Handle PUT request to update an existing card
-      const { cardID, name, content, status, files, dueDate, assignee, reminders } =
+      const { cardID, name, content, status, files, dueDate, assignee, reminders, labelIds } =
         await readBody(event);
 
       // HIGH FIX: Validate required fields with generic message
@@ -320,6 +331,80 @@ export default defineEventHandler(async (event) => {
               );
             }
           }
+        }
+
+        // Which labels this card wears, when the client says. Absent means
+        // "leave them alone" — the same contract as `reminders` above, so a
+        // caller that knows nothing about labels cannot strip them by omission.
+        //
+        // Only labels belonging to this card's own board are accepted, so a
+        // card cannot be made to wear another board's names by id.
+        if (Array.isArray(labelIds)) {
+          const wanted = [
+            ...new Set(
+              labelIds
+                .map((id: any) => Number(id))
+                .filter((id: number) => Number.isFinite(id) && id > 0),
+            ),
+          ];
+
+          // Names are collected alongside the ids because the history is
+          // written from them, and a word that is about to be swept would be
+          // gone by the time the entry was written.
+          const nameById = new Map<number, string>();
+          const allowed: number[] = [];
+          if (wanted.length > 0) {
+            const placeholders = wanted.map(() => "?").join(",");
+            const [ownRows]: any = await db.execute(
+              `SELECT \`id\`, \`name\` FROM \`labels\` WHERE board = ? AND id IN (${placeholders})`,
+              [board.id, ...wanted],
+            );
+            for (const row of ownRows as any[]) {
+              allowed.push(Number(row.id));
+              nameById.set(Number(row.id), String(row.name));
+            }
+          }
+
+          // What it wore before, so anything it is putting down can be swept
+          // if no other card picked it up. A label exists because a card uses
+          // it; the last card to drop a name takes the name with it, and the
+          // next card to type that word makes it again.
+          const [wornRows]: any = await db.execute(
+            "SELECT l.`id`, l.`name` FROM `card_labels` cl JOIN `labels` l ON l.id = cl.label WHERE cl.`card` = ?",
+            [cardID],
+          );
+          const before: number[] = [];
+          for (const row of wornRows as any[]) {
+            before.push(Number(row.id));
+            nameById.set(Number(row.id), String(row.name));
+          }
+
+          await db.execute("DELETE FROM `card_labels` WHERE `card` = ?", [
+            cardID,
+          ]);
+          for (const labelId of allowed) {
+            await db.execute(
+              "INSERT INTO `card_labels` (`card`, `label`) VALUES (?, ?)",
+              [cardID, labelId],
+            );
+          }
+
+          // Labelling a card is a change to it, so it belongs in the card's own
+          // history beside the due date and the assignee. Not in the
+          // notifications: nobody needs telling by e-mail that a card is now
+          // marked "Bug", and the history is where you look to find out.
+          const added = allowed.filter((id) => !before.includes(id));
+          const removed = before.filter((id) => !allowed.includes(id));
+          if (added.length || removed.length) {
+            const named = (ids: number[]) =>
+              ids.map((id) => nameById.get(id)).filter(Boolean);
+            await recordCardActivity(cardID, "labels", userId, {
+              added: named(added),
+              removed: named(removed),
+            });
+          }
+
+          await pruneUnusedLabels(db, removed);
         }
 
         // A changed due date means the reminders should fire again.
@@ -453,6 +538,17 @@ export default defineEventHandler(async (event) => {
             filedata: row.filedata,
           }));
         }
+
+        // The labels it wears now. The answer carries them, and so does the
+        // broadcast built from it, so another client showing this card is
+        // told what changed rather than left with what it had.
+        const [currentLabels]: any = await db.execute(
+          `SELECT l.id, l.name
+             FROM \`card_labels\` cl JOIN \`labels\` l ON l.id = cl.label
+            WHERE cl.card = ? ORDER BY l.sort ASC, l.id ASC`,
+          [cardID],
+        );
+        card.labels = currentLabels;
 
         // Emit socket event for card update (only for API calls, not frontend)
         if (auth.viaApiKey) {

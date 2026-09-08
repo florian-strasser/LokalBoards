@@ -213,6 +213,21 @@
                                         /></span>
                                     </span>
                                 </span>
+                                <!-- Labels on their own line above the counts,
+                                     as on the board's own tile — and the reason
+                                     the hit is here at all when the word that
+                                     matched was one of them. -->
+                                <span
+                                    v-if="card.labels?.length"
+                                    class="mt-1 flex flex-wrap gap-1 pl-8"
+                                >
+                                    <span
+                                        v-for="label in card.labels"
+                                        :key="label.id"
+                                        class="label-pill"
+                                        >{{ label.name }}</span
+                                    >
+                                </span>
                                 <!-- The card's own meta line, as on the board. -->
                                 <span
                                     v-if="cardHasMeta(card)"

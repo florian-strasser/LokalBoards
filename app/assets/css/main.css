@@ -875,3 +875,158 @@ select.form-control,
         background-color: color-mix(in oklab, var(--color-dark) 82%, transparent);
     }
 }
+
+/* ---------------------------------------------------------------------------
+   Labels.
+   --------------------------------------------------------------------------- */
+/* Every label is drawn in the brand colour, and none of them carries one of its
+   own.
+
+   They used to. Each label was given one of the twelve board presets, which
+   meant the menu for adding one was mostly a colour grid — a decision put in
+   front of somebody who wanted to type the word "Bug" — and it made labels
+   harder to read rather than easier: a label in the dark preset sat on the dark
+   theme's own panels and vanished into them.
+
+   One tint, mixed from `--color-primary`, defined here and used everywhere a
+   label appears: on a card's tile, on the line under the card's buttons, and as
+   the words offered when adding one. */
+.label-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    max-width: 100%;
+    border-radius: 0.375rem;
+    padding: 0.125rem 0.5rem;
+    font-size: 0.75rem;
+    line-height: 1.25rem;
+    font-weight: 500;
+    background-color: color-mix(in oklab, var(--color-primary) 12%, transparent);
+    color: var(--color-primary-hover);
+}
+
+/* A label you can act on: the ones on the card, which are reworded by clicking
+   the word and taken off by the cross, and the ones offered in the menu, which
+   are added by clicking them. The whole pill answers the pointer, because the
+   pill is the thing being pointed at — a hover drawn on a wrapper around it was
+   a second background creeping out from behind the first.
+
+   Hover only, deliberately: `:focus-within` would also fire while a label is
+   being reworded, and rewording is meant to change the word and nothing else —
+   the label should not restyle itself around the field. */
+button.label-pill:hover,
+button.label-pill:focus-visible,
+.label-pill-editable:hover {
+    background-color: color-mix(in oklab, var(--color-primary) 22%, transparent);
+}
+.label-pill-editable {
+    padding-right: 0.25rem;
+}
+
+/* Rewording happens inside the pill, so the field has to be invisible: no box
+   of its own, no colour of its own, the pill's own text metrics. All that
+   changes when a label is being reworded is that its word became typeable. */
+.label-pill-input {
+    border: 0;
+    padding: 0;
+    margin: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    letter-spacing: inherit;
+    outline: 0;
+}
+
+/* And it has to be exactly as wide as the word inside it, or the label grows
+   the moment you click it.
+
+   A `size` attribute cannot do that: it counts characters at the font's average
+   width, which for a proportional face is not the width of these particular
+   letters — WebKit and Blink disagree about it by enough to see. So the field
+   is wrapped in a one-cell grid holding two things: the input, and a hidden
+   copy of what is typed. The copy sizes the cell, the input fills it, and the
+   pill stays the width it was.
+
+   The input carries `size="1"` for the same reason: a text input's natural
+   width is its `size`, which defaults to twenty characters, and in a grid that
+   is what the cell would be sized to. At one character it contributes nothing
+   and the hidden copy decides.
+
+   The copy carries no trailing space, so the field is the width of the word and
+   not a hair more. A space would buy room for the caret at the end of the text,
+   but neither engine needs it: with the box exactly full, both leave
+   `scrollLeft` at nought and draw the caret where it belongs. */
+.label-pill-field {
+    display: inline-grid;
+    align-items: center;
+}
+.label-pill-field::after,
+.label-pill-field > input {
+    grid-area: 1 / 1;
+    width: auto;
+    min-width: 1ch;
+    font: inherit;
+    letter-spacing: inherit;
+}
+.label-pill-field::after {
+    content: attr(data-value);
+    visibility: hidden;
+    white-space: pre;
+}
+
+/* The word itself, which is also the way into rewording it. */
+.label-pill-name {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: left;
+    color: inherit;
+}
+
+.label-pill-remove {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    border-radius: 0.25rem;
+    padding: 0.0625rem;
+    color: inherit;
+    opacity: 0.6;
+}
+.label-pill-remove:hover,
+.label-pill-remove:focus-visible {
+    opacity: 1;
+    background-color: color-mix(in oklab, var(--color-primary) 24%, transparent);
+}
+
+@media (prefers-color-scheme: dark) {
+    /* Same idea, more of it: a 12% tint that reads on white disappears on
+       near-black, and the text goes pale rather than staying the brand blue,
+       which at this size on this ground is not readable. */
+    .label-pill {
+        background-color: color-mix(
+            in oklab,
+            var(--color-primary) 26%,
+            transparent
+        );
+        color: color-mix(in oklab, var(--color-primary) 25%, var(--color-white));
+    }
+    button.label-pill:hover,
+    button.label-pill:focus-visible,
+    .label-pill-editable:hover {
+        background-color: color-mix(
+            in oklab,
+            var(--color-primary) 40%,
+            transparent
+        );
+    }
+    .label-pill-remove:hover,
+    .label-pill-remove:focus-visible {
+        background-color: color-mix(
+            in oklab,
+            var(--color-white) 18%,
+            transparent
+        );
+    }
+}

@@ -213,6 +213,10 @@ export default defineEventHandler(async (event) => {
       // Delete all areas associated with the board
       await db.execute("DELETE FROM areas WHERE board = ?", [id]);
 
+      // And the board's own labels. The assignments themselves went with the
+      // cards, in `removeCardData` above.
+      await db.execute("DELETE FROM `labels` WHERE `board` = ?", [id]);
+
       // Delete the board
       const [result] = await db.execute("DELETE FROM boards WHERE id = ?", [
         id,

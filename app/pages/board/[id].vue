@@ -339,6 +339,8 @@
                 :highlightCommentId="highlightComment"
                 :areas="areas"
                 :cardsByArea="cards"
+                :boardLabels="boardLabels"
+                @labels-changed="loadLabels"
                 v-model="cardModalOpen"
                 @card-updated="handleCardUpdated"
                 @card-deleted="handleCardDeleted"
@@ -462,6 +464,23 @@ const cardModal = ref(false);
 const unreadCardIds = ref(new Set());
 
 // Load which cards on this board still have unread notifications for this user.
+// The words this board is already using. Held here rather than in the card
+// modal so a label typed on one card is offered on the next one opened, without
+// a reload — nothing on the board is driven by this list, it is only what gets
+// suggested.
+const boardLabels = ref([]);
+
+const loadLabels = async () => {
+    try {
+        const data = await $fetch(
+            `/api/data/labels?boardId=${boardID.value}`,
+        );
+        boardLabels.value = data?.labels ?? [];
+    } catch (err) {
+        console.error("Could not load the board's labels:", err);
+    }
+};
+
 const refreshUnreadCards = async () => {
     try {
         // Just the ids, and just this board's: asking for the notifications
@@ -609,6 +628,19 @@ const createNewArea = async () => {
 };
 
 const handleCardUpdated = (updatedCard) => {
+    // A card arriving from somebody else may be wearing a word this board has
+    // not seen yet. Learning it here is what keeps the list offered when adding
+    // a label current for everyone on the board, rather than only for whoever
+    // typed it.
+    if (Array.isArray(updatedCard.labels)) {
+        const known = new Set(boardLabels.value.map((label) => label.id));
+        const arrivals = updatedCard.labels.filter(
+            (label) => label?.id && !known.has(label.id),
+        );
+        if (arrivals.length)
+            boardLabels.value = [...boardLabels.value, ...arrivals];
+    }
+
     // Locate the card by id across all areas — the payload may omit `area`
     // (e.g. an optimistic update from the modal).
     for (const areaId in cards.value) {
@@ -1306,6 +1338,8 @@ if (!accessError.value) {
     } catch (err) {
         console.error("Error:", err);
     }
+
+    await loadLabels();
 }
 onMounted(() => {
     if (route.query.card) {

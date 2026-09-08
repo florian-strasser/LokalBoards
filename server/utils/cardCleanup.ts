@@ -10,6 +10,8 @@
 // Card duplication made it worse: a duplicate's attachments are copies on disk,
 // so every deleted duplicate leaked its own files.
 
+import { pruneUnusedLabels } from "./labelCleanup";
+
 const STORED_FILE = /^\/(?:api\/)?uploads\/([A-Za-z0-9._-]+)$/;
 
 export async function removeCardData(
@@ -36,6 +38,17 @@ export async function removeCardData(
     `DELETE FROM card_reminders WHERE card IN (${placeholders})`,
     ids,
   );
+  // What these cards wore, read while the assignments still exist. A label is
+  // kept alive by the cards using it, so the last card to carry a name takes
+  // that name with it.
+  const [worn]: any = await db.execute(
+    `SELECT DISTINCT label FROM card_labels WHERE card IN (${placeholders})`,
+    ids,
+  );
+  await db.execute(
+    `DELETE FROM card_labels WHERE card IN (${placeholders})`,
+    ids,
+  );
   await db.execute(
     `DELETE FROM card_activity WHERE card IN (${placeholders})`,
     ids,
@@ -43,6 +56,11 @@ export async function removeCardData(
   await db.execute(
     `DELETE FROM notifications WHERE cardId IN (${placeholders})`,
     ids,
+  );
+
+  await pruneUnusedLabels(
+    db,
+    (worn as any[]).map((row) => Number(row.label)),
   );
 
   const files = await unlinkOrphanedFiles(db, attachments);

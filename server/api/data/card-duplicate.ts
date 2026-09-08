@@ -131,6 +131,13 @@ export default defineEventHandler(async (event) => {
       );
     }
 
+    // A copy of a card is a copy of what it says about itself, labels included.
+    // They belong to the same board, so the ids carry over as they are.
+    await db.execute(
+      "INSERT INTO `card_labels` (`card`, `label`) SELECT ?, `label` FROM `card_labels` WHERE `card` = ?",
+      [newCardId, cardID],
+    );
+
     const [attachments]: any = await db.execute(
       "SELECT filename, filetype, filesize, filedata FROM attachments WHERE card = ? ORDER BY id ASC",
       [cardID],

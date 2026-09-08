@@ -65,11 +65,37 @@ export default defineEventHandler(async (event) => {
          JOIN areas a ON a.id = c.area
          JOIN boards b ON b.id = a.board
          LEFT JOIN \`user\` au ON au.id = c.assignee
-        WHERE ${ACCESSIBLE} AND (c.name LIKE ? ESCAPE '\\\\' OR c.content LIKE ? ESCAPE '\\\\')
+        WHERE ${ACCESSIBLE} AND (
+                c.name LIKE ? ESCAPE '\\\\'
+                OR c.content LIKE ? ESCAPE '\\\\'
+                OR EXISTS (
+                     SELECT 1 FROM \`card_labels\` cl
+                       JOIN \`labels\` l ON l.id = cl.label
+                      WHERE cl.card = c.id AND l.name LIKE ? ESCAPE '\\\\'
+                   )
+              )
         ORDER BY (c.name LIKE ? ESCAPE '\\\\') DESC, c.id DESC
         LIMIT ${PER_GROUP}`,
-      [userId, userId, like, like, like],
+      [userId, userId, like, like, like, like],
     );
+
+    // A card's labels travel with it, for two reasons: a hit found by its label
+    // should show the word that found it, and a card that says "Bug" on the
+    // board should say it here too rather than looking like a different card.
+    const labelsByCard = new Map<number, any[]>();
+    if (cards.length > 0) {
+      const cardPh = cards.map(() => "?").join(",");
+      const [labelRows]: any = await db.execute(
+        `SELECT cl.card AS card, l.id, l.name
+           FROM \`card_labels\` cl JOIN \`labels\` l ON l.id = cl.label
+          WHERE cl.card IN (${cardPh}) ORDER BY l.sort ASC, l.id ASC`,
+        cards.map((c: any) => c.id),
+      );
+      for (const row of labelRows as any[]) {
+        if (!labelsByCard.has(row.card)) labelsByCard.set(row.card, []);
+        labelsByCard.get(row.card)!.push({ id: row.id, name: row.name });
+      }
+    }
 
     // Board hits show who is on the board, so attach the members the same way
     // the dashboard does: the owner plus everyone invited, capped at the four
@@ -164,6 +190,7 @@ export default defineEventHandler(async (event) => {
         assigneeImage: c.assigneeImage,
         commentCount: Number(c.commentCount) || 0,
         attachmentCount: Number(c.attachmentCount) || 0,
+        labels: labelsByCard.get(c.id) || [],
         checklist: checklistProgress(c.content),
         snippet: String(c.name ?? "")
           .toLowerCase()

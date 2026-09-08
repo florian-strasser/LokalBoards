@@ -194,192 +194,218 @@
                      name; once set the button shows the value and reopens the
                      menu when clicked. -->
                 <div
-                    v-if="writeAccess || dueDate || assignee"
-                    class="mb-4 flex flex-wrap items-center gap-2"
+                    v-if="
+                        writeAccess ||
+                        dueDate ||
+                        assignee ||
+                        cardLabels.length
+                    "
+                    class="mb-4"
                 >
-                    <!-- Due date -->
-                    <PopoverMenu v-if="writeAccess">
-                        <template #trigger>
-                            <button type="button" :class="chipClass(!!dueDate)">
-                                <Clock class="size-4 shrink-0" />
-                                <span>{{
-                                    dueDate
-                                        ? formatDateTime(dueDate)
-                                        : $t("dueDate")
-                                }}</span>
-                            </button>
-                        </template>
-                        <template #default>
-                            <div class="w-64 space-y-3">
-                                <div>
-                                    <label
-                                        class="block text-sm font-bold text-dark dark:text-white mb-1"
+                    <div
+                        v-if="writeAccess || dueDate || assignee"
+                        class="flex flex-wrap items-center gap-2"
+                    >
+                        <!-- Due date -->
+                        <PopoverMenu v-if="writeAccess">
+                            <template #trigger>
+                                <button type="button" :class="chipClass(!!dueDate)">
+                                    <Clock class="size-4 shrink-0" />
+                                    <span>{{
+                                        dueDate
+                                            ? formatDateTime(dueDate)
+                                            : $t("dueDate")
+                                    }}</span>
+                                </button>
+                            </template>
+                            <template #default>
+                                <div class="w-64 space-y-3">
+                                    <div>
+                                        <label
+                                            class="block text-sm font-bold text-dark dark:text-white mb-1"
+                                        >
+                                            {{ $t("dueDate") }}
+                                        </label>
+                                        <input
+                                            type="datetime-local"
+                                            v-model="dueDateInput"
+                                            @change="saveCard"
+                                            class="form-control"
+                                        />
+                                    </div>
+                                    <div v-if="dueDate">
+                                        <label
+                                            class="block text-sm font-bold text-dark dark:text-white mb-1"
+                                        >
+                                            {{ $t("reminders") }}
+                                        </label>
+                                        <ul
+                                            v-if="reminders.length"
+                                            class="flex flex-wrap gap-2 mb-2"
+                                        >
+                                            <li
+                                                v-for="m in reminders"
+                                                :key="m"
+                                                class="flex items-center gap-1 bg-primary/10 dark:bg-white/10 text-dark dark:text-white px-3 py-1 rounded-full text-sm"
+                                            >
+                                                <Bell class="size-4 shrink-0" />
+                                                <span>{{ reminderLabel(m) }}</span>
+                                                <button
+                                                    type="button"
+                                                    @click="removeReminder(m)"
+                                                    class="hover:text-primary-hover"
+                                                >
+                                                    <X class="size-4" />
+                                                </button>
+                                            </li>
+                                        </ul>
+                                        <select
+                                            v-if="availableReminderPresets.length"
+                                            @change="addReminder"
+                                            class="form-control text-sm"
+                                        >
+                                            <option value="">
+                                                {{ $t("addReminder") }}
+                                            </option>
+                                            <option
+                                                v-for="preset in availableReminderPresets"
+                                                :key="preset.minutes"
+                                                :value="preset.minutes"
+                                            >
+                                                {{ $t(preset.label) }}
+                                            </option>
+                                        </select>
+                                    </div>
+                                    <button
+                                        v-if="dueDate"
+                                        type="button"
+                                        @click="clearDueDate"
+                                        class="flex items-center gap-1 text-sm text-primary hover:text-primary-hover"
                                     >
-                                        {{ $t("dueDate") }}
-                                    </label>
-                                    <input
-                                        type="datetime-local"
-                                        v-model="dueDateInput"
-                                        @change="saveCard"
-                                        class="form-control"
-                                    />
+                                        <X class="size-4" />
+                                        <span>{{ $t("delete") }}</span>
+                                    </button>
                                 </div>
-                                <div v-if="dueDate">
-                                    <label
-                                        class="block text-sm font-bold text-dark dark:text-white mb-1"
+                            </template>
+                        </PopoverMenu>
+                        <div v-else-if="dueDate" :class="chipClass(true)">
+                            <Clock class="size-4 shrink-0" />
+                            <span>{{ formatDateTime(dueDate) }}</span>
+                        </div>
+
+                        <!-- Assignee -->
+                        <PopoverMenu v-if="writeAccess">
+                            <template #trigger>
+                                <button
+                                    type="button"
+                                    :class="chipClass(!!assignee)"
+                                >
+                                    <span
+                                        v-if="assignee && assigneeImage"
+                                        class="size-5 rounded-full overflow-hidden shrink-0"
                                     >
-                                        {{ $t("reminders") }}
+                                        <img
+                                            :src="assigneeImage"
+                                            class="w-full h-full object-cover"
+                                        />
+                                    </span>
+                                    <UserPlus v-else class="size-4 shrink-0" />
+                                    <span>{{
+                                        assignee ? assigneeName : $t("assignee")
+                                    }}</span>
+                                </button>
+                            </template>
+                            <template #default="{ close }">
+                                <div class="w-56">
+                                    <label
+                                        class="block text-sm font-bold text-dark dark:text-white mb-2"
+                                    >
+                                        {{ $t("assignee") }}
                                     </label>
                                     <ul
-                                        v-if="reminders.length"
-                                        class="flex flex-wrap gap-2 mb-2"
+                                        class="space-y-1 max-h-60 overflow-auto"
                                     >
-                                        <li
-                                            v-for="m in reminders"
-                                            :key="m"
-                                            class="flex items-center gap-1 bg-primary/10 dark:bg-white/10 text-dark dark:text-white px-3 py-1 rounded-full text-sm"
-                                        >
-                                            <Bell class="size-4 shrink-0" />
-                                            <span>{{ reminderLabel(m) }}</span>
+                                        <li>
                                             <button
                                                 type="button"
-                                                @click="removeReminder(m)"
-                                                class="hover:text-primary-hover"
+                                                @click="setAssignee('', close)"
+                                                class="flex items-center gap-2 w-full px-2 py-1.5 rounded-lg hover:bg-primary/10 dark:hover:bg-white/10 text-dark dark:text-white"
                                             >
-                                                <X class="size-4" />
+                                                <span
+                                                    class="size-6 rounded-full bg-gray/20 flex items-center justify-center shrink-0"
+                                                >
+                                                    <X class="size-3.5" />
+                                                </span>
+                                                <span class="grow text-left">{{
+                                                    $t("unassigned")
+                                                }}</span>
+                                                <Check
+                                                    v-if="!assignee"
+                                                    class="size-4 text-primary shrink-0"
+                                                />
+                                            </button>
+                                        </li>
+                                        <li v-for="m in members" :key="m.id">
+                                            <button
+                                                type="button"
+                                                @click="setAssignee(m.id, close)"
+                                                class="flex items-center gap-2 w-full px-2 py-1.5 rounded-lg hover:bg-primary/10 dark:hover:bg-white/10 text-dark dark:text-white"
+                                            >
+                                                <span
+                                                    class="size-6 rounded-full overflow-hidden bg-primary text-white flex items-center justify-center shrink-0 text-xs"
+                                                >
+                                                    <img
+                                                        v-if="m.image"
+                                                        :src="m.image"
+                                                        class="w-full h-full object-cover"
+                                                    />
+                                                    <template v-else>{{
+                                                        (m.name || "?").charAt(0)
+                                                    }}</template>
+                                                </span>
+                                                <span class="grow text-left">{{
+                                                    m.name
+                                                }}</span>
+                                                <Check
+                                                    v-if="assignee === m.id"
+                                                    class="size-4 text-primary shrink-0"
+                                                />
                                             </button>
                                         </li>
                                     </ul>
-                                    <select
-                                        v-if="availableReminderPresets.length"
-                                        @change="addReminder"
-                                        class="form-control text-sm"
-                                    >
-                                        <option value="">
-                                            {{ $t("addReminder") }}
-                                        </option>
-                                        <option
-                                            v-for="preset in availableReminderPresets"
-                                            :key="preset.minutes"
-                                            :value="preset.minutes"
-                                        >
-                                            {{ $t(preset.label) }}
-                                        </option>
-                                    </select>
                                 </div>
-                                <button
-                                    v-if="dueDate"
-                                    type="button"
-                                    @click="clearDueDate"
-                                    class="flex items-center gap-1 text-sm text-primary hover:text-primary-hover"
-                                >
-                                    <X class="size-4" />
-                                    <span>{{ $t("delete") }}</span>
-                                </button>
-                            </div>
-                        </template>
-                    </PopoverMenu>
-                    <div v-else-if="dueDate" :class="chipClass(true)">
-                        <Clock class="size-4 shrink-0" />
-                        <span>{{ formatDateTime(dueDate) }}</span>
-                    </div>
-
-                    <!-- Assignee -->
-                    <PopoverMenu v-if="writeAccess">
-                        <template #trigger>
-                            <button
-                                type="button"
-                                :class="chipClass(!!assignee)"
+                            </template>
+                        </PopoverMenu>
+                        <div v-else-if="assignee" :class="chipClass(true)">
+                            <span
+                                v-if="assigneeImage"
+                                class="size-5 rounded-full overflow-hidden shrink-0"
                             >
-                                <span
-                                    v-if="assignee && assigneeImage"
-                                    class="size-5 rounded-full overflow-hidden shrink-0"
-                                >
-                                    <img
-                                        :src="assigneeImage"
-                                        class="w-full h-full object-cover"
-                                    />
-                                </span>
-                                <UserPlus v-else class="size-4 shrink-0" />
-                                <span>{{
-                                    assignee ? assigneeName : $t("assignee")
-                                }}</span>
-                            </button>
-                        </template>
-                        <template #default="{ close }">
-                            <div class="w-56">
-                                <label
-                                    class="block text-sm font-bold text-dark dark:text-white mb-2"
-                                >
-                                    {{ $t("assignee") }}
-                                </label>
-                                <ul
-                                    class="space-y-1 max-h-60 overflow-auto"
-                                >
-                                    <li>
-                                        <button
-                                            type="button"
-                                            @click="setAssignee('', close)"
-                                            class="flex items-center gap-2 w-full px-2 py-1.5 rounded-lg hover:bg-primary/10 dark:hover:bg-white/10 text-dark dark:text-white"
-                                        >
-                                            <span
-                                                class="size-6 rounded-full bg-gray/20 flex items-center justify-center shrink-0"
-                                            >
-                                                <X class="size-3.5" />
-                                            </span>
-                                            <span class="grow text-left">{{
-                                                $t("unassigned")
-                                            }}</span>
-                                            <Check
-                                                v-if="!assignee"
-                                                class="size-4 text-primary shrink-0"
-                                            />
-                                        </button>
-                                    </li>
-                                    <li v-for="m in members" :key="m.id">
-                                        <button
-                                            type="button"
-                                            @click="setAssignee(m.id, close)"
-                                            class="flex items-center gap-2 w-full px-2 py-1.5 rounded-lg hover:bg-primary/10 dark:hover:bg-white/10 text-dark dark:text-white"
-                                        >
-                                            <span
-                                                class="size-6 rounded-full overflow-hidden bg-primary text-white flex items-center justify-center shrink-0 text-xs"
-                                            >
-                                                <img
-                                                    v-if="m.image"
-                                                    :src="m.image"
-                                                    class="w-full h-full object-cover"
-                                                />
-                                                <template v-else>{{
-                                                    (m.name || "?").charAt(0)
-                                                }}</template>
-                                            </span>
-                                            <span class="grow text-left">{{
-                                                m.name
-                                            }}</span>
-                                            <Check
-                                                v-if="assignee === m.id"
-                                                class="size-4 text-primary shrink-0"
-                                            />
-                                        </button>
-                                    </li>
-                                </ul>
-                            </div>
-                        </template>
-                    </PopoverMenu>
-                    <div v-else-if="assignee" :class="chipClass(true)">
-                        <span
-                            v-if="assigneeImage"
-                            class="size-5 rounded-full overflow-hidden shrink-0"
-                        >
-                            <img
-                                :src="assigneeImage"
-                                class="w-full h-full object-cover"
-                            />
-                        </span>
-                        <UserPlus v-else class="size-4 shrink-0" />
-                        <span>{{ assigneeName }}</span>
+                                <img
+                                    :src="assigneeImage"
+                                    class="w-full h-full object-cover"
+                                />
+                            </span>
+                            <UserPlus v-else class="size-4 shrink-0" />
+                            <span>{{ assigneeName }}</span>
+                        </div>
+                        <!-- Labels -->
+                        <LabelPicker
+                            v-model="cardLabels"
+                            :boardID="props.boardID"
+                            :suggestions="props.boardLabels"
+                            :writeAccess="writeAccess"
+                            @labels-changed="emits('labels-changed')"
+                            @changed="saveCard"
+                        />
                     </div>
+                    <CardLabels
+                        v-model="cardLabels"
+                        :boardID="props.boardID"
+                        :writeAccess="writeAccess"
+                        @labels-changed="emits('labels-changed')"
+                        @changed="saveCard"
+                    />
                 </div>
                 <!-- Live presence: who else has this card open right now. On its
                      own line below the metadata buttons so it never competes
@@ -538,6 +564,10 @@ const props = defineProps({
     // offer somewhere to move to, and the cards already there to place against.
     areas: { type: Array, default: () => [] },
     cardsByArea: { type: Object, default: () => ({}) },
+    // The words this board is already using, held by the board page. They are
+    // only ever offered when a label is added here — what this card wears is
+    // this card's own business, and travels with the card.
+    boardLabels: { type: Array, default: () => [] },
 });
 
 const nuxtApp = useNuxtApp();
@@ -547,6 +577,9 @@ const emits = defineEmits([
     "card-duplicated",
     "card-moved",
     "comment-count-updated",
+    // The board's label set changed from inside the card, so whoever owns that
+    // list should re-read it.
+    "labels-changed",
 ]);
 
 // The board's and the dashboard's menu items, to the letter — the menu is the
@@ -659,6 +692,10 @@ const dueDate = ref(props.card.dueDate || ""); // ISO string, or "" when unset
 const assignee = ref(props.card.assignee || "");
 const reminders = ref([...(props.card.reminders || [])]);
 const members = ref([]); // board members for the assignee picker
+// The labels themselves rather than their ids: they are what the tile behind
+// this modal draws, so a label added here reaches it without waiting for the
+// board to re-read anything.
+const cardLabels = ref([...(props.card.labels || [])]);
 
 // Shared chip/button style for the metadata popover triggers. Filled when the
 // field holds a value, subtler when it's still an "add" prompt.
@@ -1096,6 +1133,7 @@ const saveCard = async () => {
         dueDate: dueDate.value || null,
         assignee: assignee.value || null,
         reminders: [...reminders.value],
+        labels: cardLabels.value.map(({ id, name }) => ({ id, name })),
         assigneeName: assigneeMemberNow?.name ?? null,
         assigneeImage: assigneeMemberNow?.image ?? null,
     });
@@ -1112,6 +1150,7 @@ const saveCard = async () => {
                 dueDate: dueDate.value || null,
                 assignee: assignee.value || null,
                 reminders: reminders.value,
+                labelIds: cardLabels.value.map((label) => label.id),
             },
         });
         // Update the attachments list with the new attachments
@@ -1133,6 +1172,7 @@ const saveCard = async () => {
                 ({ filedata, ...meta }) => meta,
             ),
             reminders: response.card.reminders ?? reminders.value,
+            labels: cardLabels.value.map(({ id, name }) => ({ id, name })),
             assigneeName: assigneeMember?.name ?? null,
             assigneeImage: assigneeMember?.image ?? null,
         });
@@ -1229,6 +1269,8 @@ const handleCardUpdated = (updatedCard, updatedAttachments) => {
             assignee.value = updatedCard.assignee || "";
         if (Array.isArray(updatedCard.reminders))
             reminders.value = [...updatedCard.reminders];
+        if (Array.isArray(updatedCard.labels))
+            cardLabels.value = [...updatedCard.labels];
         // Update attachments if they exist in the updated card
         if (updatedAttachments) {
             attachments.value = updatedAttachments;

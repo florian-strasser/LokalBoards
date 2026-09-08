@@ -173,3 +173,53 @@ jobs:
           tags: florianstrasser/lokalboards:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  nix-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      # The Nix package takes its dependencies straight from package-lock.json,
+      # so there is no hash to fall out of step with it any more. What this
+      # guards is the step before that: `importNpmLock` has to be able to build
+      # whatever shape the lockfile is in, and it has failed on this project
+      # before — npm reaching for the registry mid-build, which a sandbox
+      # forbids. Without this, that only ever surfaced when somebody tried to
+      # install LokalBoards through Nix.
+      - name: Build the Nix package
+        run: nix build .#lokalboards --print-build-logs
+
+      # The NixOS module is evaluated as part of a real system: option types,
+      # the `environmentFile` assertion and the generated systemd unit all have
+      # to hold together. Evaluating is not booting — see nix/module.nix — but
+      # it catches everything short of runtime behaviour.
+      - name: Evaluate the NixOS module
+        run: |
+          nix eval --impure --raw --expr '
+            let
+              flake = builtins.getFlake (toString ./.);
+              system = (flake.inputs.nixpkgs.lib.nixosSystem {
+                system = builtins.currentSystem;
+                modules = [
+                  flake.nixosModules.lokalboards
+                  {
+                    boot.loader.grub.devices = [ "/dev/sda" ];
+                    fileSystems."/" = { device = "/dev/sda1"; fsType = "ext4"; };
+                    system.stateVersion = "24.05";
+                    services.lokalboards = {
+                      enable = true;
+                      environmentFile = "/run/secrets/lokalboards.env";
+                    };
+                  }
+                ];
+              });
+            in system.config.systemd.units."lokalboards.service".text
+          '

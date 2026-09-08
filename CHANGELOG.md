@@ -1,3 +1,35 @@
+## v0.35.0
+
+### New Features
+
+- **Cards can carry labels.** A short word — *Bug*, *Blocked*, *Design* — typed on a card from a third button beside the due date and the assignee, and drawn on the card's tile so a board says what kind of work it is holding without anything being opened.
+
+  A label is text on a card, not a list the board keeps and you switch on and off. The third button does one thing: it adds one. Type the word — anything the board is already using is offered under the field, and picking it there is the same as typing it out, because the same word is the same label, which is what keeps a board from ending up with three spellings of *Bug*. The labels themselves sit on their own line under the buttons, and that line is where they are changed: click the word to reword it, the cross at its end to take it off. Both act on the card you are on, so rewording points *that* card at another word and leaves every other card alone, and a word no card uses any more stops being offered.
+
+  A label is one of the words a card can be found by. Searching for *Bug* turns up the cards marked *Bug* as well as the ones that mention it in a name or a description, each hit drawn with its labels so it is clear which word answered — through the search field, and through `searchCards` for anything driving the instance over MCP.
+
+  Labelling a card is part of its history: adding, rewording and removing one another are written into **Comments and activity** beside the due date and the assignee, so a card says who labelled it and when. Not into the notifications — nobody needs an e-mail because a card is now marked *Bug*, and the history is where you would look anyway. What does travel is the change itself: a label added by one person appears on everybody else's board as it happens, and the words the board is using are learned from what arrives, so the list offered when adding one stays current for everyone rather than only for whoever typed it.
+
+  Neither ended up where it started. The labels were drawn inside the button that sets them, which grew as they were added and shoved the two beside it around; and taking one off was buried in that button's menu, which is the last place you look for it when the label you want rid of is sitting right there on the card.
+
+  Every label is drawn in one colour, mixed from the app's own brand colour and defined in a single place for both themes. Labels did carry a colour each at first, which turned the menu for adding one into a colour grid — a decision put in front of somebody who wanted to type the word "Bug" — and made them harder to read rather than easier, since a label in a dark preset disappeared into the dark theme's own panels. A duplicated card keeps its labels, and a deleted card or board takes its own with it.
+
+### Improvements
+
+- **A card's popover menus were able to float above the card instead of inside it.** The due date, the assignee and now the labels each open a small panel, and that panel was drawn inside the dialog's own scrolling area — so one taller than the card stuck out past the bottom of it, was clipped there, and gave the card a scrollbar it had no reason to have. The panels are drawn over the page now and placed against their button, flipping above it when there is more room up there and scrolling inside themselves when there is not enough either way. The tooltips have been out there for the same reason for some time; this is the same problem one component along.
+
+### Fixes
+
+- **Installing through Nix works again, and cannot quietly stop working the same way twice.** The Nix package pinned a hash describing `package-lock.json` as it stood several releases ago. Nothing made the two move together, so the dependency updates in v0.34.2 left them disagreeing and `nix build` — along with the NixOS module that depends on it — stopped at a hash mismatch. Nobody noticed, because nothing on the way to a release ever built it.
+
+  Rather than refresh the hash and wait for the next time, the package now reads `package-lock.json` directly and fetches each dependency by the integrity field already written beside it. There is no separate hash left to fall out of step with anything. This was tried when the packaging was first written and abandoned — the tooling could not build this lockfile then, and the note explaining why is still in `nix/package.nix`, now describing what changed since.
+
+  Two smaller things fell out of it: the build no longer runs `npm ci` at all, which is what used to reach for the registry from inside a sandbox that forbids it, and the dependency tree is copied rather than linked, because Nitro writes into it while building and a tree pointing back at the read-only store fails that.
+
+### Continuous Integration
+
+- **CI builds the Nix package and evaluates the NixOS module.** The packaging had no way of failing where anyone would see it — the only thing that exercised it was somebody installing LokalBoards through Nix. It is built on every push now, and the module is evaluated as part of a real system configuration, so option types, the `environmentFile` assertion and the generated systemd unit all have to hold together. Evaluating a module is not booting one, which still wants a NixOS machine or a virtual one.
+
 ## v0.34.3
 
 ### Improvements

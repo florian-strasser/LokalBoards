@@ -1,11 +1,12 @@
 { lib
-, buildNpmPackage
+, stdenv
+, importNpmLock
 , nodejs_22
 , nodejs_24
 , makeWrapper
 }:
 
-buildNpmPackage (finalAttrs: {
+stdenv.mkDerivation (finalAttrs: {
   pname = "lokalboards";
   # Taken from package.json rather than written here, so `npm version` stays the
   # single place a release number is set and the two cannot drift apart.
@@ -27,16 +28,27 @@ buildNpmPackage (finalAttrs: {
         || lib.hasPrefix ".git/" rel);
   };
 
-  # `importNpmLock` was the first attempt here, because it needs no hash to keep
-  # in sync. It cannot build this lockfile: it caches tarballs but not registry
-  # metadata, and npm asks the registry about `minimatch` — `archiver-utils`
-  # wants ^9 and `readdir-glob` wants ^5 while the lockfile pins one copy at
-  # 10.2.5 — so the install dies with ENOTCACHED. fetchNpmDeps, which is what
-  # this hash belongs to, caches the metadata as well.
+  # Dependencies come from the lockfile itself, with no hash of their own to
+  # keep in step with it.
   #
-  # Regenerate after any dependency change: set this to lib.fakeHash, build, and
-  # copy the hash the failure prints.
-  npmDepsHash = "sha256-20wuFDS/MOeRRysvkOrmLQ9sFBTvmlW2+8PLKgFTSf8=";
+  # This was tried once before and abandoned: `importNpmLock` used to cache
+  # tarballs but not registry metadata, npm would ask the registry about
+  # `minimatch` — `archiver-utils` wants ^9 and `readdir-glob` wants ^5 while
+  # the lockfile pins one copy — and the sandboxed install died with ENOTCACHED.
+  # It builds this lockfile now, so the aggregate hash `fetchNpmDeps` needs is
+  # gone with it. That matters more than the convenience: the hash described the
+  # lockfile at one moment in time and nothing made the two move together, so a
+  # dependency change silently broke `nix build` until somebody tried it. This
+  # cannot drift, because there is nothing left to drift from — the lockfile is
+  # read directly, and every package is fetched by the integrity field already
+  # written beside it.
+  #
+  # `npmRoot` is the filtered source above rather than the directory this file
+  # sits in, so the lockfile used is the very one that goes into the build.
+  npmDeps = importNpmLock.buildNodeModules {
+    npmRoot = finalAttrs.src;
+    nodejs = nodejs_24;
+  };
 
   # Built with Node 24 for its npm 11, and *run* on Node 22 (see the wrapper
   # below). package-lock.json is written by npm 11, and npm 10 — which is what
@@ -46,13 +58,28 @@ buildNpmPackage (finalAttrs: {
   # which a sandboxed build has no access to, and dies with ENOTCACHED. The
   # Dockerfile solves the same problem by installing npm 11 over the image's
   # npm 10. Only the build toolchain differs; Nuxt's output is portable JS.
-  nodejs = nodejs_24;
-  nativeBuildInputs = [ makeWrapper ];
+  nativeBuildInputs = [ nodejs_24 makeWrapper ];
 
-  # `--ignore-scripts`: the postinstall is `nuxt prepare`, which `npm run build`
-  # does again anyway, and esbuild's install script would rather fetch its
-  # binary than find the one npm already unpacked.
-  npmFlags = [ "--ignore-scripts" ];
+  # The dependency tree is copied into place rather than installed or symlinked.
+  #
+  # Not installed, because `npm ci` re-resolves and reaches for the registry,
+  # which a sandboxed build cannot do — that is the ENOTCACHED failure this
+  # package kept running into.
+  #
+  # Not symlinked (`importNpmLock.linkNodeModulesHook`) either: Nitro copies
+  # dependencies into `.output/server/node_modules` as it builds, and a tree
+  # pointing back at the read-only store fails that with EACCES.
+  #
+  # Copying costs a little disk in the sandbox and sidesteps both. The old
+  # `--ignore-scripts` goes with the install step: nothing runs a postinstall
+  # now, and `npm run build` does the `nuxt prepare` that one would have.
+  configurePhase = ''
+    runHook preConfigure
+    cp -r ${finalAttrs.npmDeps}/node_modules ./node_modules
+    chmod -R u+w ./node_modules
+    export PATH="$PWD/node_modules/.bin:$PATH"
+    runHook postConfigure
+  '';
 
   # Nuxt phones home on build unless told not to. There is no network in the
   # sandbox, so this is the difference between a clean build and a wait for a

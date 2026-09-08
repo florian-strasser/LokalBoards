@@ -94,8 +94,13 @@ export default defineMcpTool({
       params.push(areaId);
     }
     if (query) {
-      where.push("(c.name LIKE ? OR c.content LIKE ?)");
-      params.push(`%${query}%`, `%${query}%`);
+      // A label is one of the words a card is findable by, the same as its name
+      // and its description — searching for "Bug" should turn up the cards
+      // marked Bug, not nothing.
+      where.push(
+        "(c.name LIKE ? OR c.content LIKE ? OR EXISTS (SELECT 1 FROM `card_labels` cl JOIN `labels` l ON l.id = cl.label WHERE cl.card = c.id AND l.name LIKE ?))",
+      );
+      params.push(`%${query}%`, `%${query}%`, `%${query}%`);
     }
     if (done !== undefined) {
       where.push("c.status = ?");
@@ -129,6 +134,23 @@ export default defineMcpTool({
       [userId, ...params],
     );
 
+    // The labels each hit wears, so a caller that searched by one can see it,
+    // and one that did not still knows what the card says about itself.
+    const labelsByCard = new Map<number, string[]>();
+    if (rows.length > 0) {
+      const ph = rows.map(() => "?").join(",");
+      const [labelRows]: any = await db.execute(
+        `SELECT cl.card AS card, l.name
+           FROM \`card_labels\` cl JOIN \`labels\` l ON l.id = cl.label
+          WHERE cl.card IN (${ph}) ORDER BY l.sort ASC, l.id ASC`,
+        rows.map((row: any) => row.id),
+      );
+      for (const row of labelRows as any[]) {
+        if (!labelsByCard.has(row.card)) labelsByCard.set(row.card, []);
+        labelsByCard.get(row.card)!.push(row.name);
+      }
+    }
+
     return jsonResult({
       count: rows.length,
       cards: rows.map((row: any) => ({
@@ -138,6 +160,7 @@ export default defineMcpTool({
         areaName: row.areaName,
         assigneeName: row.assigneeName ?? null,
         assigneeType: row.assigneeType ?? null,
+        labels: labelsByCard.get(row.id) || [],
       })),
     });
   },
