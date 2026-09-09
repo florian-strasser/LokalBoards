@@ -19,7 +19,14 @@ export async function runDueReminders(db: any): Promise<number> {
        FROM card_reminders r
        JOIN cards c ON c.id = r.card
        JOIN areas a ON a.id = c.area
+       JOIN boards b ON b.id = a.board
       WHERE r.notified = 0
+        -- Nothing archived is anybody's problem any more: a card put away, a
+        -- column put away with its cards in it, or a whole board. The reminder
+        -- rows stay, so restoring brings the reminders back with the card.
+        AND c.archivedAt IS NULL
+        AND a.archivedAt IS NULL
+        AND b.archivedAt IS NULL
         AND c.dueDate IS NOT NULL
         AND NOW() >= (c.dueDate - INTERVAL r.minutesBefore MINUTE)
         AND c.dueDate >= (NOW() - INTERVAL 1 DAY)`,

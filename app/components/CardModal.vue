@@ -183,7 +183,7 @@
                                 @click="deleteModal = true"
                                 :class="menuItemDestructiveClass"
                             >
-                                <Trash2 class="size-4 shrink-0" />
+                                <Archive class="size-4 shrink-0" />
                                 {{ $t("deleteCardBtn") }}
                             </button>
                         </ActionMenu>
@@ -532,6 +532,7 @@ import {
     Check,
     CopyPlus,
     MoveRight,
+    Archive,
     Trash2,
     Paperclip,
     Download,

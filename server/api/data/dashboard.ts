@@ -23,8 +23,9 @@ export default defineEventHandler(async (event) => {
       `SELECT b.*, (b.user = ?) AS owned, bp.\`group\` AS groupId, bp.sort AS placementSort
          FROM boards b
          LEFT JOIN board_placements bp ON bp.board = b.id AND bp.user = ?
-        WHERE b.user = ?
-           OR b.id IN (SELECT board FROM invitations WHERE user = ?)
+        WHERE b.archivedAt IS NULL
+          AND (b.user = ?
+               OR b.id IN (SELECT board FROM invitations WHERE user = ?))
         ORDER BY b.id DESC`,
       [userId, userId, userId, userId],
     );

@@ -570,8 +570,9 @@ export default defineEventHandler(async (event) => {
         return { card, attachments };
       }
     } else if (method === "DELETE") {
-      // Handle DELETE request to delete a card
-      const { cardID } = await readBody(event);
+      // Handle DELETE request: archives the card, or removes it for good when
+      // the caller asks for that explicitly.
+      const { cardID, permanent } = await readBody(event);
 
       // HIGH FIX: Validate cardID is a positive integer
       if (!cardID || isNaN(Number(cardID)) || Number(cardID) <= 0) {
@@ -608,6 +609,32 @@ export default defineEventHandler(async (event) => {
         event.res.statusCode = writeDecision.status;
         return { error: writeDecision.error };
       }
+      // Archiving is what a delete does now. The card comes off the board and
+      // keeps everything it has — its comments, its files, its history — so it
+      // can be put back exactly as it was. Only the archive itself asks for
+      // `permanent`, and that is the old, unrecoverable path below.
+      if (!permanent) {
+        if (!card.archivedAt) {
+          await db.execute(
+            "UPDATE cards SET archivedAt = NOW() WHERE id = ? AND archivedAt IS NULL",
+            [cardID],
+          );
+          await recordCardActivity(cardID, "archived", userId);
+        }
+
+        // It has left the board, which is what every other client needs to
+        // know; whether it was destroyed or filed away is this endpoint's
+        // business, not theirs.
+        if (auth.viaApiKey) {
+          const serverSocket = getServerSocket();
+          serverSocket.to(`board-${boardRows[0]?.id}`).emit("deletedCard", {
+            boardId: boardRows[0]?.id,
+            card,
+          });
+        }
+        return { message: "Card archived successfully", card };
+      }
+
       {
         // Everything that hung off the card — its comments, its attachments and
         // the files behind them, its reminders, its activity and its

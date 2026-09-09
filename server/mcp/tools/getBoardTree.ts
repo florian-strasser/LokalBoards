@@ -26,7 +26,7 @@ export default defineMcpTool({
     const board = await requireBoard(id, userId, "read");
 
     const [areas]: any = await db.execute(
-      "SELECT * FROM areas WHERE board = ? ORDER BY sort ASC",
+      "SELECT * FROM areas WHERE board = ? AND archivedAt IS NULL ORDER BY sort ASC",
       [id],
     );
     const [cards]: any = await db.execute(
@@ -34,7 +34,8 @@ export default defineMcpTool({
               (SELECT COUNT(*) FROM comments co WHERE co.card = c.id) AS commentCount,
               (SELECT COUNT(*) FROM attachments a WHERE a.card = c.id) AS attachmentCount
        FROM cards c
-       WHERE c.area IN (SELECT id FROM areas WHERE board = ?)
+       WHERE c.archivedAt IS NULL
+         AND c.area IN (SELECT id FROM areas WHERE board = ? AND archivedAt IS NULL)
        ORDER BY c.sort ASC`,
       [id],
     );

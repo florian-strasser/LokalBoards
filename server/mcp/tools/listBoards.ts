@@ -15,7 +15,8 @@ export default defineMcpTool({
     const [rows]: any = await db.execute(
       `SELECT DISTINCT boards.* FROM boards
        LEFT JOIN invitations ON boards.id = invitations.board
-       WHERE boards.user = ? OR invitations.user = ?
+       WHERE boards.archivedAt IS NULL
+         AND (boards.user = ? OR invitations.user = ?)
        ORDER BY boards.id`,
       [userId, userId],
     );

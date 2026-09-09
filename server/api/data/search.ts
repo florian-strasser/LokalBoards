@@ -14,7 +14,12 @@ import { checklistProgress } from "../../../app/utils/checklistProgress";
 // couldn't already open. There is deliberately no "search everything" path for
 // admins: being an admin doesn't grant board access anywhere else either.
 const ACCESSIBLE =
-  "(b.user = ? OR b.id IN (SELECT board FROM invitations WHERE user = ?))";
+  "b.archivedAt IS NULL AND (b.user = ? OR b.id IN (SELECT board FROM invitations WHERE user = ?))";
+
+// Cards, comments and attachments all hang off a card in an area, and every one
+// of those three searches joins them as `c` and `a`. Something you archived is
+// not something you are looking for.
+const LIVE_CARD = "c.archivedAt IS NULL AND a.archivedAt IS NULL";
 
 const PER_GROUP = 8;
 
@@ -65,7 +70,7 @@ export default defineEventHandler(async (event) => {
          JOIN areas a ON a.id = c.area
          JOIN boards b ON b.id = a.board
          LEFT JOIN \`user\` au ON au.id = c.assignee
-        WHERE ${ACCESSIBLE} AND (
+        WHERE ${ACCESSIBLE} AND ${LIVE_CARD} AND (
                 c.name LIKE ? ESCAPE '\\\\'
                 OR c.content LIKE ? ESCAPE '\\\\'
                 OR EXISTS (
@@ -144,7 +149,7 @@ export default defineEventHandler(async (event) => {
          JOIN areas a ON a.id = c.area
          JOIN boards b ON b.id = a.board
          LEFT JOIN \`user\` u ON u.id = co.user
-        WHERE ${ACCESSIBLE} AND co.content LIKE ? ESCAPE '\\\\'
+        WHERE ${ACCESSIBLE} AND ${LIVE_CARD} AND co.content LIKE ? ESCAPE '\\\\'
         ORDER BY co.date DESC
         LIMIT ${PER_GROUP}`,
       [userId, userId, like],
@@ -158,7 +163,7 @@ export default defineEventHandler(async (event) => {
          JOIN cards c ON c.id = at.card
          JOIN areas a ON a.id = c.area
          JOIN boards b ON b.id = a.board
-        WHERE ${ACCESSIBLE} AND at.filename LIKE ? ESCAPE '\\\\'
+        WHERE ${ACCESSIBLE} AND ${LIVE_CARD} AND at.filename LIKE ? ESCAPE '\\\\'
         ORDER BY at.id DESC
         LIMIT ${PER_GROUP}`,
       [userId, userId, like],

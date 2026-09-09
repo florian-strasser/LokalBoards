@@ -19,11 +19,22 @@
                             <Import class="size-4 shrink-0" />
                             {{ $t("importFromTrello") }}
                         </button>
+                        <button
+                            type="button"
+                            @click="archiveModal = true"
+                            class="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-dark hover:bg-primary/10 hover:text-primary dark:text-white"
+                        >
+                            <ArchiveRestore class="size-4 shrink-0" />
+                            {{ $t("archive") }}
+                        </button>
                     </ActionMenu>
                 </template>
             </SectionHeader>
             <BoardDashboard v-if="session" @new-board="openCreateBoard" />
         </ContentWrapper>
+        <!-- The boards this account has archived. A restored board comes back
+             on its own: the server tells every dashboard it belongs on. -->
+        <ArchiveModal v-model="archiveModal" />
         <ModalWindow v-model="createBoard">
             <div>
                 <form @submit.prevent="saveBoard" class="text-left space-y-5">
@@ -136,7 +147,7 @@
     </div>
 </template>
 <script setup lang="ts">
-import { Import } from "lucide-vue-next";
+import { ArchiveRestore, Import } from "lucide-vue-next";
 
 const nuxtApp = useNuxtApp();
 
@@ -148,6 +159,7 @@ const { data: session } = await useFetch("/api/auth/get-session");
 
 const userID = session.value.data.user.id;
 const createBoard = ref(false);
+const archiveModal = ref(false);
 
 // Offer the first-run guided tour to accounts that haven't been onboarded yet.
 const onboarding = useOnboarding();

@@ -1178,6 +1178,30 @@ const migrations: Migration[] = [
     },
   },
 
+  {
+    // Deleting becomes archiving.
+    //
+    // Everything a board is made of could only ever be destroyed: a card, an
+    // area with every card in it, a whole board with every area, card, comment
+    // and uploaded file. One misplaced click and the answer was "restore your
+    // backup" — an unkind answer from an app whose whole pitch is that the data
+    // is yours and it is on your machine.
+    //
+    // A date rather than a flag: it says when, which is what you want to know
+    // when you find something in the archive and cannot remember putting it
+    // there. Null means live, and every list the app draws asks for null.
+    id: "0027_archive_instead_of_delete",
+    up: async (db) => {
+      for (const table of ["cards", "areas", "boards"]) {
+        if (!(await columnExists(db, table, "archivedAt"))) {
+          await db.execute(
+            `ALTER TABLE \`${table}\` ADD COLUMN \`archivedAt\` datetime NULL DEFAULT NULL`,
+          );
+        }
+      }
+    },
+  },
+
   // To add a further schema change, append a new migration here, e.g.:
   // {
   //   id: "0015_add_x",

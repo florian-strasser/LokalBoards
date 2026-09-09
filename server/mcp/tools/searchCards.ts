@@ -83,7 +83,13 @@ export default defineMcpTool({
 
     // params holds the WHERE values only; the invitations join's userId is
     // prepended at call time (it comes first in the statement).
-    const where: string[] = ["(b.user = ? OR inv.user IS NOT NULL)"];
+    // Archived work is not what an agent is being asked to look through.
+    const where: string[] = [
+      "c.archivedAt IS NULL",
+      "ar.archivedAt IS NULL",
+      "b.archivedAt IS NULL",
+      "(b.user = ? OR inv.user IS NOT NULL)",
+    ];
     const params: any[] = [userId];
     if (boardId) {
       where.push("b.id = ?");

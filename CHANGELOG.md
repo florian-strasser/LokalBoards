@@ -1,3 +1,41 @@
+## v0.36.0
+
+### New Features
+
+- **Deleting is archiving.** A card, an area or a whole board now goes to an archive instead of being destroyed. The row stays, everything hanging off it stays — a card keeps its comments, its attachments and their files, its labels, its reminders and its history — and it disappears from every list the app draws: the board, the dashboard, search, and the reminder mails.
+
+  **⋮ › Archive** on a board lists the areas and cards it has put away, with the date each one left and what it was in; the same entry on the dashboard lists archived boards. Restoring puts a thing back exactly where it was. Archiving an area takes its cards with it without marking them one by one, which is what makes restoring it give back the column it was, in the order it was in — and it is why a card archived inside an area is not offered separately.
+
+  Deleting for good is still there, and the archive is the only place it lives: the bin beside an entry removes it and everything belonging to it. That is the one irreversible action in the app, and it now takes a deliberate visit to find rather than one confident click on a board.
+
+  An archived board still opens from a link or a bookmark, because refusing to show somebody their own board is a strange way to tell them it is safe. It says at the top what it is, and the owner can restore it from there.
+
+  This changes what `DELETE` means over the API and over MCP: it archives, and the old behaviour is `permanent`. Three lists that quietly kept working are now explicit about it — an archived card is nobody's overdue reminder, is not a search hit, and is not something an agent is asked to look through.
+
+- **A board can be filtered.** A funnel beside the three-dots menu narrows the board by label, by assignee, by due date — overdue, today, this week, or no date at all — and by open or done. Several labels widen the answer, since that is what a set of tags should do; a label *and* an assignee narrows it.
+
+  It runs in the browser on the cards already loaded, so it is instant and asks the server nothing. Cards that do not match are hidden rather than left out of the list, which means dragging still works while a filter is on and a card still lands where it looks like it landed — SortableJS moves the elements it is given, and a filtered array would have had it computing positions in a list the board does not hold. The people offered are the ones who actually have a card here, taken from the cards themselves rather than from the board's membership, because a member with nothing assigned would only ever filter the board down to nothing.
+
+- **Areas count their cards.** The number sits in the column header. While a filter is on it counts both — **3 / 12** — so a column that has gone quiet is saying why rather than looking like it lost something.
+
+### Security
+
+- **SVGO updated in both lockfiles.** Four advisories were raised against `svgo`, a package LokalBoards does not name directly: it arrives through Nuxt's Vite builder, which uses `cssnano` to minify CSS, which reaches for `postcss-svgo` when a stylesheet carries an inline SVG. Two say its opt-in `removeScripts` plugin lets executable links through — namespace-prefixed anchors, and URL schemes broken up with tabs or newlines (high, CVSS 8.2); two say the same plugin does not look inside `<foreignObject>`, where executable HTML can sit (moderate, CVSS 6.1). Both pairs were reported twice over, once for the app and once for the documentation site, which keeps its own lockfile.
+
+  Nothing here calls SVGO, and `removeScripts` is off by default, so this was reach rather than exposure — but a build-time dependency that mishandles untrusted SVG is not one to sit on. `postcss-svgo` already asked for `^4.0.2`, so the patched 4.1.0 needed no override and no change to any `package.json`: both lockfiles were refreshed, and the only other packages that moved are the two SVGO itself now requires (`css-select` 6, `css-what` 7), which nothing else in either tree depends on. The Nix package reads `package-lock.json` directly since v0.34.4, so it follows without a hash to update.
+
+- **Nodemailer updated, and this one is not build-time.** Four advisories stood against the version LokalBoards was sending its mail with, and Dependabot had not raised any of them. Two are recipient-domain validation bypasses — one through IDN and Punycode, one through RFC 5322 comments — where an address that passes a domain allow-list can still be delivered somewhere else; one is quadratic time in the address parser, reachable by a crafted address list; one lets `resolveContent()` past `disableFileAccess` and `disableUrlAccess` when called the old way (high, CVSS scores up to 8.1). Every mail this app sends goes to an address somebody typed — an invitation, a password reset — so this is the one on the list that is actually exercised in normal use. `^9.0.3` already admitted the patched 9.1.1.
+
+  Address parsing being the thing that changed, the mail path was checked rather than assumed: an invitation was sent through the new version into a real SMTP server, with the plain address, a plus address, a subdomain and an IDN recipient. All four were accepted and delivered, subject, HTML body and inline attachment intact.
+
+- **`js-yaml` and `hono` updated too** — a merge-key case that spends CPU without limit (high) and three Hono advisories about writing outside an output directory, unbounded nesting in `parseBody()` and query parameters read past a URL fragment (moderate). Both arrive transitively, and both were fixable within their declared ranges.
+
+- **Vitest 3 to 5, which closes the last one.** `@vitest/mocker` can be made to read a file from outside the project by redirecting a mock (moderate), and the fix is Vitest 5 — two majors up from the 3.2.7 this was on, and it drags `@nuxt/test-utils` from 3 to 4 with it, since only 4 accepts Vitest 5. Nothing here ships a test runner, so this was a question of when rather than whether.
+
+  It turned out to need no changes at all: the three configs, the mocks and the setup files were taken as they stood, and all three suites pass unchanged — 150 unit tests, 36 integration tests against a throwaway MySQL, and the 12 end-to-end ones that build and drive the real server through `@nuxt/test-utils`, which is the part a major version of it could have broken. Vitest 5 wants Node `^22.12.0`, which is below what Nuxt 4.5.2 already asks for, so nothing changes about what this project runs on.
+
+  Both dependency trees — the app's and the documentation site's — now report nothing outstanding.
+
 ## v0.35.0
 
 ### New Features

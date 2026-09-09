@@ -52,8 +52,13 @@
                          and relies on its static position to sit below. -->
                     <div
                         v-if="!accessError"
-                        class="flex h-9 shrink-0 items-center sm:h-12"
+                        class="flex h-9 shrink-0 items-center gap-2 sm:h-12"
                     >
+                    <BoardFilter
+                        v-model="boardFilter"
+                        :labels="boardLabels"
+                        :assignees="filterAssignees"
+                    />
                     <ActionMenu
                         :tooltip="$t('moreOptions')"
                         :data-onboarding="
@@ -79,10 +84,18 @@
                             </button>
                             <button
                                 type="button"
+                                @click="archiveModal = true"
+                                :class="menuItemClass"
+                            >
+                                <ArchiveRestore class="size-4 shrink-0" />
+                                {{ $t("archive") }}
+                            </button>
+                            <button
+                                type="button"
                                 @click="openDeleteBoard"
                                 :class="menuItemDestructiveClass"
                             >
-                                <Trash2 class="size-4 shrink-0" />
+                                <Archive class="size-4 shrink-0" />
                                 {{ $t("deleteBoard") }}
                             </button>
                         </template>
@@ -99,6 +112,27 @@
                     </div>
                 </div>
             </div>
+        </div>
+        <!-- An archived board still opens from a link or a bookmark: refusing
+             to show somebody their own board is a strange way to tell them it
+             is safe. So it says what it is instead, and the owner can put it
+             back from here. -->
+        <div
+            v-if="boardArchived && !accessError"
+            class="bg-primary/10 mx-8 mb-2 flex flex-wrap items-center gap-3 rounded-lg px-4 py-3 dark:bg-white/10"
+        >
+            <ArchiveRestore class="text-primary size-5 shrink-0" />
+            <span class="text-dark grow dark:text-white">{{
+                $t("boardArchivedNotice")
+            }}</span>
+            <button
+                v-if="userID === boardUser"
+                type="button"
+                class="bg-primary hover:bg-primary-hover rounded-lg px-3 py-1.5 text-sm text-white"
+                @click="restoreBoard"
+            >
+                {{ $t("restore") }}
+            </button>
         </div>
         <div
             ref="boardScroller"
@@ -158,13 +192,25 @@
                                 :disabled="!writeAccess"
                                 class="font-bold bg-transparent text-dark dark:text-white focus:outline-none shrink grow"
                             />
+                            <!-- How many cards are in this column — and, while
+                                 a filter is on, how many of them you are being
+                                 shown, so a column that has gone quiet is
+                                 telling you why. -->
+                            <span
+                                v-if="cards[area.id]?.length"
+                                class="text-gray shrink-0 grow-0 px-2 text-sm tabular-nums"
+                            >
+                                <template v-if="filtering"
+                                    >{{ visibleCount(area.id) }} / </template
+                                >{{ cards[area.id].length }}
+                            </span>
                             <button
                                 v-if="writeAccess"
                                 @click="openDeleteAreaModal(area.id)"
                                 class="text-primary hover:text-primary-hover shrink-0 grow-0"
-                                v-tooltip="$t('delete')"
+                                v-tooltip="$t('deleteAreaButton')"
                             >
-                                <Trash2 class="size-5" />
+                                <Archive class="size-5" />
                             </button>
                         </div>
                         <div
@@ -199,9 +245,20 @@
                                  unpadded — 8px wider than the column and sitting
                                  4px high — until the page was reloaded. -->
                             <div class="card-list space-y-1">
+                                <!-- Hidden rather than left out of the
+                                     list: SortableJS drags the DOM children it
+                                     is given, and a filtered array would have
+                                     it computing positions in a list the board
+                                     does not actually hold. Dragging keeps
+                                     working while a filter is on, and lands
+                                     where it looks like it landed. -->
                                 <CardTile
                                     v-for="card in cards[area.id]"
                                     :card="card"
+                                    :class="{
+                                        hidden:
+                                            filtering && !cardVisible(card),
+                                    }"
                                     :has-unread="unreadCardIds.has(card.id)"
                                     :viewers="viewersFor(card.id)"
                                     v-model="cardModal"
@@ -313,6 +370,11 @@
         <ModalWindow v-if="userID === boardUser" v-model="inviteModal">
             <InviteModal :boardID="boardID" :invitations="invitations" />
         </ModalWindow>
+        <ArchiveModal
+            v-model="archiveModal"
+            :boardID="boardID * 1"
+            @restored="reloadAreas"
+        />
         <ModalWindow v-model="deleteAreaModal">
             <h2 class="text-4xl text-dark dark:text-white mb-3">
                 {{ $t("deleteAreaHeadline") }}
@@ -353,8 +415,21 @@
 </template>
 <script setup lang="ts">
 import { socket } from "~/lib/socket";
+import {
+    EMPTY_FILTER,
+    assigneesOf,
+    isFiltering,
+    matchesFilter,
+} from "@/utils/boardFilter";
 import Sortable from "sortablejs";
-import { Pencil, UserRoundPlus, Ban, Trash2, X } from "lucide-vue-next";
+import {
+    Archive,
+    ArchiveRestore,
+    Pencil,
+    UserRoundPlus,
+    Ban,
+    X,
+} from "lucide-vue-next";
 import { Plus } from "lucide-vue-next";
 
 const nuxtApp = useNuxtApp();
@@ -367,6 +442,23 @@ const boardID = ref(route.params.id);
 
 const boardName = ref($t("untitledBoard"));
 const boardUser = ref(false);
+// An archived board is off everybody's dashboard but still opens from a link or
+// a bookmark, because refusing to show somebody their own board is a strange
+// way to tell them it is safe. What it does instead is say so, at the top.
+const boardArchived = ref(false);
+
+const restoreBoard = async () => {
+    try {
+        await $fetch("/api/data/archive", {
+            method: "POST",
+            body: { type: "board", id: boardID.value * 1 },
+        });
+        boardArchived.value = false;
+        await nuxtApp.callHook("app:toast", { message: $t("boardRestored") });
+    } catch (err) {
+        console.error("Could not restore this board:", err);
+    }
+};
 const boardStyle = ref("kanban");
 const boardStatus = ref("private");
 const boardImage = ref(null);
@@ -433,6 +525,19 @@ watch(anyModalOpen, (open) => {
 });
 const areas = ref([]);
 const cards = ref({});
+
+// What the board is currently showing. Held here, applied in the browser to the
+// cards already loaded, and deliberately not put in the address: a filter is
+// how you are looking at the board this minute, not a place you meant to link
+// somebody to.
+const boardFilter = ref({ ...EMPTY_FILTER });
+const filtering = computed(() => isFiltering(boardFilter.value));
+const cardVisible = (card) => matchesFilter(card, boardFilter.value);
+const visibleCount = (areaId) =>
+    (cards.value[areaId] || []).filter(cardVisible).length;
+const filterAssignees = computed(() =>
+    assigneesOf(Object.values(cards.value).flat(), $t("unassigned")),
+);
 
 // Guided-tour progress: advance when the user completes each step's action.
 const onboarding = useOnboarding();
@@ -813,6 +918,21 @@ const handleDeleteArea = async (areaId) => {
 };
 
 // Fetch cards for a specific area
+const archiveModal = ref(false);
+
+// Re-read the board's columns and their cards. Used when something comes back
+// out of the archive, which can put back a whole column at once.
+const reloadAreas = async () => {
+    try {
+        const data = await $fetch(`/api/data/areas?boardId=${boardID.value}`);
+        if (!data?.areas) return;
+        areas.value = data.areas;
+        for (const area of areas.value) await fetchCardsForArea(area.id);
+    } catch (err) {
+        console.error("Could not reload the board:", err);
+    }
+};
+
 const fetchCardsForArea = async (areaId) => {
     try {
         const { data, error } = await useFetch(
@@ -1303,6 +1423,7 @@ try {
             title: data.value.board.name,
         });
         boardUser.value = data.value.board.user;
+        boardArchived.value = !!data.value.board.archivedAt;
         boardStyle.value = data.value.board.style || "kanban";
         boardStatus.value = data.value.board.status || "private";
         boardImage.value = data.value.board.image || null;

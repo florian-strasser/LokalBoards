@@ -23,7 +23,7 @@ export default defineMcpTool({
     const id = requireId(boardId, boardID, "boardId");
     await requireBoard(id, userId, "read");
     const [rows]: any = await db.execute(
-      "SELECT * FROM areas WHERE board = ? ORDER BY sort ASC",
+      "SELECT * FROM areas WHERE board = ? AND archivedAt IS NULL ORDER BY sort ASC",
       [id],
     );
     return jsonResult({ areas: rows.map(serializeArea) });

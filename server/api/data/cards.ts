@@ -51,7 +51,15 @@ export default defineEventHandler(async (event) => {
         //   ?assignee=<userId>    only cards assigned to that user
         //   ?unassigned=true      only cards nobody has been assigned
         //   ?dueBefore=<ISO>      only cards due before that timestamp
-        const filters: string[] = ["c.area = ?"];
+        // An archived card is not on the board. Neither is one whose whole
+        // area was archived — the area took its cards with it without marking
+        // each of them, so that restoring it brings back exactly what was in
+        // it.
+        const filters: string[] = [
+          "c.area = ?",
+          "c.archivedAt IS NULL",
+          "EXISTS (SELECT 1 FROM areas ar WHERE ar.id = c.area AND ar.archivedAt IS NULL)",
+        ];
         const params: any[] = [areaId];
         if (query.done !== undefined && query.done !== "") {
           filters.push("c.status = ?");

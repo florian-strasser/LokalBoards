@@ -109,6 +109,8 @@ export default defineEventHandler(async (event) => {
       const query = getQuery(event);
       const id = query.id;
       const boardId = query.boardId;
+      // Archiving unless the archive itself asks for the unrecoverable one.
+      const permanent = String(query.permanent ?? "") === "true";
       if (!id || !boardId) {
         event.res.statusCode = 400;
         return {
@@ -148,6 +150,24 @@ export default defineEventHandler(async (event) => {
           event.res.statusCode = 403;
           return { error: "You don't have permission to delete this area" };
         }
+        // An archived area takes its cards with it without touching them: the
+        // cards keep their own `archivedAt` as null, and the board simply stops
+        // asking for the cards of areas that are not there. Restoring the area
+        // brings back exactly what was in it, in the order it was in.
+        if (!permanent) {
+          await db.execute(
+            "UPDATE areas SET archivedAt = NOW() WHERE id = ? AND archivedAt IS NULL",
+            [id],
+          );
+          if (auth.viaApiKey) {
+            const serverSocket = getServerSocket();
+            serverSocket
+              ?.to(`board-${boardId}`)
+              .emit("deleteArea", { area: id, boardId });
+          }
+          return { message: "Area archived successfully" };
+        }
+
         // Everything belonging to the cards in this area goes with them — see
         // `removeCardData`. The card ids are read first, because once the cards
         // are gone there is no way to find what belonged to them.

@@ -148,9 +148,11 @@ export default defineEventHandler(async (event) => {
         board,
       };
     } else if (method === "DELETE") {
-      // Handle DELETE request to delete a board
+      // Handle DELETE request: archives the board, or removes it and
+      // everything in it for good when the archive asks for that.
       const query = getQuery(event);
       const id = query.id;
+      const permanent = String(query.permanent ?? "") === "true";
 
       // Deleting a board is owner-only, so resolve the user and check ownership
       // directly rather than using the general access helper.
@@ -190,6 +192,24 @@ export default defineEventHandler(async (event) => {
       // invitations are gone there is no way to work out whose dashboards were
       // showing it.
       const memberIds = await getBoardMemberIds(db, id);
+
+      // Archiving leaves all of it in place — the areas, the cards, the
+      // invitations, the uploaded files — and takes the board off everybody's
+      // dashboard. The people who were on it are told the same thing they are
+      // told about a deletion, because from where they are standing the board
+      // has gone; the owner is the one who can bring it back.
+      if (!permanent) {
+        await db.execute(
+          "UPDATE boards SET archivedAt = NOW() WHERE id = ? AND archivedAt IS NULL",
+          [id],
+        );
+        if (auth.viaApiKey) {
+          const serverSocket = getServerSocket();
+          serverSocket?.to(`board-${id}`).emit("deletedBoard", { boardId: id });
+        }
+        await notifyDashboards(db, id, memberIds);
+        return { message: "Board archived successfully" };
+      }
 
       // Delete all invitations associated with the board
       await db.execute("DELETE FROM invitations WHERE board = ?", [id]);

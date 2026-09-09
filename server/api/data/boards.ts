@@ -29,14 +29,14 @@ export default defineEventHandler(async (event) => {
         `SELECT boards.*
          FROM boards
          LEFT JOIN invitations ON boards.id = invitations.board
-         WHERE invitations.user = ?`,
+         WHERE invitations.user = ? AND boards.archivedAt IS NULL`,
         [userId],
       );
       rows = sharedRows;
     } else {
       // Fetch the authenticated user's own boards
       const [ownRows] = await db.execute(
-        "SELECT * FROM boards WHERE user = ?",
+        "SELECT * FROM boards WHERE user = ? AND archivedAt IS NULL",
         [userId],
       );
       rows = ownRows;

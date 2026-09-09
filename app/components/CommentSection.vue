@@ -390,6 +390,10 @@ const activityText = (a: any): string => {
                       }),
                   })
                 : $t("activityDueCleared");
+        case "archived":
+            return $t("activityArchived");
+        case "restored":
+            return $t("activityRestored");
         case "labels": {
             const added = (d.added || []).join(", ");
             const removed = (d.removed || []).join(", ");

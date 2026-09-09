@@ -22,7 +22,7 @@ export default defineEventHandler(async (event) => {
       }
 
       const [rows] = await db.execute(
-        "SELECT * FROM areas WHERE board = ? ORDER BY sort ASC",
+        "SELECT * FROM areas WHERE board = ? AND archivedAt IS NULL ORDER BY sort ASC",
         [boardId],
       );
 
