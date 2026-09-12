@@ -104,10 +104,36 @@ describe("isUsableRedirect", () => {
     expect(isUsableRedirect("http://example.com/callback")).toBe(false);
   });
 
-  it("refuses the schemes that would make it an injection", () => {
-    expect(isUsableRedirect("javascript:alert(1)")).toBe(false);
-    expect(isUsableRedirect("data:text/html,hi")).toBe(false);
-    expect(isUsableRedirect("file:///etc/passwd")).toBe(false);
+  it("takes a private-use scheme, the way a native app receives its callback", () => {
+    // RFC 8252: a reverse domain name the app controls.
+    expect(isUsableRedirect("com.example.app:/callback")).toBe(true);
+    expect(isUsableRedirect("de.florian-strasser.boards:/oauth")).toBe(true);
+  });
+
+  it("refuses every scheme a browser would interpret itself", () => {
+    // Stated as a class, not a list. The check allows what it recognises rather
+    // than forbidding what somebody remembered, which is what CodeQL caught:
+    // `vbscript:` was missing from the old denylist, and it would never have
+    // been the last one missing.
+    for (const dangerous of [
+      "javascript:alert(1)",
+      "vbscript:msgbox(1)",
+      "data:text/html,hi",
+      "file:///etc/passwd",
+      "blob:https://example.com/abc",
+      "about:blank",
+      "mailto:someone@example.com",
+      "JavaScript:alert(1)",
+      "jAvAsCrIpT:alert(1)",
+    ]) {
+      expect(isUsableRedirect(dangerous)).toBe(false);
+    }
+  });
+
+  it("refuses a single-word custom scheme, which RFC 8252 tells apps not to use", () => {
+    // `myapp://callback` is rejected on purpose: nothing distinguishes it from
+    // a scheme a browser acts on, and the failure is visible rather than silent.
+    expect(isUsableRedirect("myapp://callback")).toBe(false);
   });
 
   it("refuses nonsense", () => {

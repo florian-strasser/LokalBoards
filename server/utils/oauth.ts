@@ -179,9 +179,24 @@ async function fetchClientMetadata(clientId: string): Promise<OAuthClient | null
   }
 }
 
+// A private-use scheme, as RFC 8252 tells a native app to choose one: a reverse
+// domain name it controls, so `com.example.app:/callback`. The dots are what
+// this matches on, and they are the whole point — every scheme a browser
+// interprets itself (`javascript:`, `vbscript:`, `data:`, `blob:`, `about:`,
+// `file:`) is a single word, so a rule that requires a dotted scheme cannot be
+// satisfied by any of them, including the ones nobody has thought of yet.
+const PRIVATE_USE_SCHEME = /^[a-z][a-z0-9+-]*(\.[a-z0-9+-]+)+:$/i;
+
 /**
- * A redirect target we are willing to send somebody to. HTTPS anywhere, plus
- * loopback HTTP, which is how a desktop client receives its callback.
+ * A redirect target we are willing to send somebody to.
+ *
+ * Stated as what is allowed rather than what is forbidden. It was the other way
+ * round — everything except `javascript:`, `data:` and `file:` — and CodeQL was
+ * right to call that incomplete: `vbscript:` was missing, and so were `blob:`
+ * and `about:`, and a list like that is never finished. It matters because
+ * registration is open and the consent screen navigates the browser to whatever
+ * a client registered, so an executable scheme here is script running on this
+ * instance's own origin.
  */
 export function isUsableRedirect(value: string): boolean {
   try {
@@ -195,10 +210,7 @@ export function isUsableRedirect(value: string): boolean {
       return ["127.0.0.1", "localhost", "[::1]", "::1"].includes(url.hostname);
     }
 
-    // A private-use scheme is how a native app receives its callback. It has no
-    // host to check, so it is taken as given — except for the three that would
-    // turn a redirect into code execution or a file read.
-    return !["javascript:", "data:", "file:"].includes(url.protocol);
+    return PRIVATE_USE_SCHEME.test(url.protocol);
   } catch {
     return false;
   }
