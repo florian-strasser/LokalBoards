@@ -29,9 +29,26 @@ const mockupB64 = readFileSync(new URL("./mockup.png", import.meta.url)).toStrin
 const future = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 const days = (n) => new Date(Date.now() + n * 24 * 60 * 60 * 1000);
 
+// The server creates the schema on startup, and answers requests before it has
+// finished: run.sh waits for the port, which is not the same as waiting for the
+// last migration. Wait for the table the newest one adds, or the seed races it
+// and falls over on whichever table was added most recently.
+const LAST_MIGRATION = "0027";
+for (let i = 0; i < 240; i++) {
+  const [rows] = await db
+    .query("SELECT 1 FROM `migrations` WHERE `id` LIKE ?", [`${LAST_MIGRATION}%`])
+    .catch(() => [[]]);
+  if (rows.length) break;
+  if (i === 239) {
+    console.error(`Gave up waiting for migration ${LAST_MIGRATION} to be applied.`);
+    process.exit(1);
+  }
+  await new Promise((r) => setTimeout(r, 250));
+}
+
 // Clean slate.
 await db.query("SET FOREIGN_KEY_CHECKS=0");
-for (const t of ["user","session","boards","areas","cards","comments","attachments","invitations","notifications"]) {
+for (const t of ["user","session","boards","areas","cards","card_labels","labels","comments","attachments","invitations","notifications"]) {
   await db.query(`TRUNCATE TABLE \`${t}\``);
 }
 await db.query("SET FOREIGN_KEY_CHECKS=1");
@@ -107,17 +124,17 @@ await db.query(
     [2,1,"Redesign the logo",1,richDesc,0,days(5),"u-ben"],
     [3,1,"Draft the pricing page",2,"Three tiers: Free, Pro, Team.",0,days(9),null],
     [14,1,"Write the launch announcement",3,"Blog post and the mail to existing customers.",0,null,null],
-    [15,1,"Audit the onboarding e-mails",4,"Three of them still link to the old domain.",0,null,"u-carol"],
+    [15,1,"Audit the onboarding e-mails",4,"- [x] Welcome\n- [ ] Password reset\n- [ ] Invitation",0,days(6),"u-carol"],
     [16,1,"Plan the Q4 roadmap workshop",5,"Half a day, everyone, agenda beforehand.",0,days(14),null],
     [17,1,"Collect customer feedback",6,"Ten interviews, fifteen minutes each.",0,null,null],
     [18,1,"Sketch the mobile navigation",7,"",0,null,null],
     [19,1,"Review the accessibility report",8,"Contrast and focus order, mostly.",0,days(11),null],
     [20,1,"Evaluate a status page provider",9,"",0,null,null],
 
-    [4,2,"Build the public API",0,"REST endpoints for boards, cards and comments.",0,days(3),"u-alex"],
+    [4,2,"Build the public API",0,"- [x] Boards\n- [x] Cards\n- [ ] Comments",0,days(3),"u-alex"],
     [5,2,"New onboarding flow",1,"A three-step guided tour for first-time users.",0,null,null],
     [21,2,"Migrate to the new mail provider",2,"Move the templates over and reverify the domain.",0,days(4),"u-ben"],
-    [22,2,"Rework the settings screen",3,"Too many sections, no order to them.",0,null,"u-carol"],
+    [22,2,"Rework the settings screen",3,"- [x] Group the sections\n- [ ] Move the danger zone",0,days(7),"u-carol"],
     [23,2,"Write the API documentation",4,"Every endpoint, with an example request.",0,days(8),null],
     [24,2,"Add board templates",5,"",0,null,null],
     [25,2,"Speed up the dashboard query",6,"It fans out one query per board.",0,null,null],
@@ -127,16 +144,40 @@ await db.query(
     [7,3,"Launch the landing page",1,"Ship the marketing site.",1,null,null],
     [27,3,"Ship the dark theme",2,"",1,null,null],
     [28,3,"Publish the Docker image",3,"Both architectures, on every tag.",1,null,null],
-    [29,3,"Add two-factor sign-in",4,"",1,null,"u-alex"],
+    [29,3,"Add two-factor sign-in",4,"- [x] TOTP\n- [x] Recovery codes",1,days(-3),"u-alex"],
     [30,3,"Import boards from Trello",5,"Lists, cards, checklists, comments, attachments.",1,null,null],
     [31,3,"Move attachments to disk",6,"",1,null,null],
-    [32,3,"Wire up the webhooks",7,"",1,null,"u-ben"],
+    [32,3,"Wire up the webhooks",7,"- [x] Signing\n- [x] Retries",1,days(-1),"u-ben"],
     [8,4,"Website Relaunch: hero section",0,"Bold headline, product screenshot, one clear call to action.",0,null,null],
     [9,5,"Buy groceries",0,"Milk, bread, coffee.",0,null,null],
     [10,5,"Call the dentist",1,"",0,days(1),null],
     [11,5,"Finish the quarterly report",2,"Numbers are in the shared drive.",1,null,null],
     [12,6,"Referral programme",0,"Give a month free for every friend invited.",0,null,null],
     [13,6,"Launch a newsletter",1,"",0,null,null],
+  ]],
+);
+
+// --- Labels on board 1 ---
+// Words on cards rather than a palette to manage: the rows exist so the same
+// word on two cards is one thing. Enough of them here that the guide's
+// screenshots show the filter with something to filter by.
+await db.query(
+  "INSERT INTO `labels` (id,board,name,color,sort) VALUES ?",
+  [[
+    [1, 1, "Design", "#0066cc", 0],
+    [2, 1, "Bug", "#0066cc", 1],
+    [3, 1, "Documentation", "#0066cc", 2],
+  ]],
+);
+await db.query(
+  "INSERT INTO `card_labels` (card,label) VALUES ?",
+  [[
+    // Card 2 ("Redesign the logo") deliberately has none: it already carries a
+    // checklist, comments, an attachment and a due date, and a label on top of
+    // those is the one thing that pushes a tile onto a third row.
+    [18, 1],
+    [15, 2], [25, 2],
+    [23, 3], [5, 3],
   ]],
 );
 

@@ -222,6 +222,8 @@ export default defineNuxtConfig({
       "0 * * * *": ["notification"],
       // Fire card due-date reminders every 5 minutes
       "*/5 * * * *": ["due-reminders"],
+      // Empty the archive of anything past its retention, once a night
+      "30 3 * * *": ["archive-retention"],
     },
   },
   vite: {

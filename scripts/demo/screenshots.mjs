@@ -6,6 +6,8 @@
 // Config via env: DEMO_BASE_URL (default http://127.0.0.1:3100),
 // DEMO_TOKEN (default demo-token-alex). The active UI language is whatever the
 // server was started with (NUXT_LANGUAGE) — run.sh restarts it per language.
+import http from "node:http";
+import { createHash, randomBytes } from "node:crypto";
 import { chromium } from "@playwright/test";
 
 // Default like gallery.mjs does: without it, running this script directly wrote
@@ -99,6 +101,9 @@ await shot(auth, "22-modal-trello-import", "/dashboard", async (p) => {
   await p.waitForTimeout(600);
 });
 // The board's actions live in a three-dots menu: open it, then pick the entry.
+// By position rather than by label, because these run in every language — so
+// the indices below are the menu's order, and adding an entry moves them:
+//   0 board settings · 1 invite · 2 duplicate · 3 archive · 4 archive board
 const boardMenuItem = (index) => async (p) => {
   await p.click('button[aria-haspopup="menu"]');
   await p.waitForTimeout(300);
@@ -107,7 +112,20 @@ const boardMenuItem = (index) => async (p) => {
 };
 await shot(auth, "23-modal-board-options", "/board/1", boardMenuItem(0));
 await shot(auth, "24-modal-invite", "/board/1", boardMenuItem(1));
-await shot(auth, "25-modal-delete-board", "/board/1", boardMenuItem(2));
+await shot(auth, "25-modal-delete-board", "/board/1", boardMenuItem(4));
+await shot(auth, "33-modal-duplicate-board", "/board/1", boardMenuItem(2));
+await shot(auth, "34-modal-archive", "/board/1", boardMenuItem(3));
+// The filter, open, with one label picked so the shot shows both what it offers
+// and what it does to the counts in the column headers.
+await shot(auth, "35-board-filter", "/board/1", async (p) => {
+  await p.locator("button:left-of(button[aria-haspopup='menu'])").first().click();
+  await p.waitForTimeout(500);
+  const label = p.locator("body > div.fixed.z-50 .label-pill").first();
+  if (await label.count()) {
+    await label.click();
+    await p.waitForTimeout(600);
+  }
+});
 await shot(auth, "26-modal-card", "/board/1", async (p) => {
   await p.click("text=Redesign the logo");
   await p.waitForTimeout(900);
@@ -130,6 +148,42 @@ await shot(auth, "28-modal-delete-area", "/board/1", async (p) => {
   await p.locator('[data-onboarding="areas"] > div').first().locator("button").first().click();
   await p.waitForTimeout(600);
 });
+// The OAuth consent screen, which needs a real request to be consenting to:
+// a client identifies itself by publishing a metadata document at a URL, so one
+// is served here for the length of the run. The server is started with the
+// loopback escape hatch (see run.sh) because that document cannot be HTTPS.
+const CLIENT_PORT = 3141;
+const clientId = `http://127.0.0.1:${CLIENT_PORT}/client.json`;
+const clientServer = http.createServer((req, res) => {
+  res.writeHead(200, { "content-type": "application/json" });
+  res.end(
+    JSON.stringify({
+      client_id: clientId,
+      client_name: "ChatGPT",
+      redirect_uris: [`http://127.0.0.1:${CLIENT_PORT}/callback`],
+      token_endpoint_auth_method: "none",
+    }),
+  );
+});
+await new Promise((r) => clientServer.listen(CLIENT_PORT, "127.0.0.1", r));
+
+const verifier = randomBytes(48).toString("base64url");
+const consentUrl =
+  "/oauth/authorize?" +
+  new URLSearchParams({
+    response_type: "code",
+    client_id: clientId,
+    redirect_uri: `http://127.0.0.1:${CLIENT_PORT}/callback`,
+    scope: "boards:read boards:write",
+    state: "demo",
+    code_challenge: createHash("sha256").update(verifier).digest("base64url"),
+    code_challenge_method: "S256",
+  });
+await shot(auth, "36-oauth-consent", consentUrl, async (p) => {
+  await p.waitForTimeout(900);
+});
+clientServer.close();
+
 await shot(auth, "30-search", "/dashboard", async (p) => {
   await p.click("header input[type=search]");
   // A term that hits several kinds of result, so the shot shows the grouping.

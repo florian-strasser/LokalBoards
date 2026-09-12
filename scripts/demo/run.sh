@@ -70,13 +70,17 @@ DOCS_SHOTS="
 20-modal-create-board:board-create
 23-modal-board-options:board-options
 24-modal-invite:board-invite
-25-modal-delete-board:board-delete
+25-modal-delete-board:board-archive
 26-modal-card:card
 27-modal-image-lightbox:card-lightbox
-28-modal-delete-area:area-delete
+28-modal-delete-area:area-archive
 30-search:search
 31-menu-card:card-menu
 32-menu-board-tile:board-tile-menu
+33-modal-duplicate-board:board-duplicate
+36-oauth-consent:oauth-consent
+34-modal-archive:archive
+35-board-filter:board-filter
 "
 export DEMO_DB_HOST DEMO_DB_USER DEMO_DB_PASS DEMO_DB_NAME DEMO_TOKEN
 export DEMO_BASE_URL="http://127.0.0.1:${DEMO_PORT}"
@@ -106,6 +110,8 @@ start_server() { # $1 = language
   NUXT_MYSQL_HOST="$DEMO_DB_HOST" NUXT_MYSQL_USER="$DEMO_DB_USER" NUXT_MYSQL_PASSWORD="$DEMO_DB_PASS" \
   NUXT_MYSQL_DATABASE="$DEMO_DB_NAME" NUXT_MYSQL_SSL=false \
   NUXT_LANGUAGE="$1" NUXT_PUBLIC_SIGNUP=true NUXT_LOG_LEVEL=error \
+  NUXT_BOARDS_URL="$DEMO_BASE_URL" \
+  NUXT_OAUTH_ALLOW_INSECURE_CLIENT_METADATA=true \
   PORT="$DEMO_PORT" NITRO_PORT="$DEMO_PORT" \
     node .output/server/index.mjs >"$LOG" 2>&1 &
   SERVER_PID=$!

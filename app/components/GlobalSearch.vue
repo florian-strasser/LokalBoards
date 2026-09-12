@@ -212,27 +212,50 @@
                                                 :term="query"
                                         /></span>
                                     </span>
-                                </span>
-                                <!-- Labels on their own line above the counts,
-                                     as on the board's own tile — and the reason
-                                     the hit is here at all when the word that
-                                     matched was one of them. -->
-                                <span
-                                    v-if="card.labels?.length"
-                                    class="mt-1 flex flex-wrap gap-1 pl-8"
-                                >
+                                    <!-- Level with the name, as on the
+                                         board's own tile: a hit whose only
+                                         extra is an avatar should not grow a
+                                         second row to hold it. -->
                                     <span
-                                        v-for="label in card.labels"
-                                        :key="label.id"
-                                        class="label-pill"
-                                        >{{ label.name }}</span
+                                        v-if="card.assignee"
+                                        class="shrink-0 grow-0"
+                                        :title="card.assigneeName || ''"
                                     >
+                                        <img
+                                            v-if="card.assigneeImage"
+                                            :src="card.assigneeImage"
+                                            :alt="card.assigneeName || ''"
+                                            class="size-6 rounded-full object-cover"
+                                        />
+                                        <span
+                                            v-else
+                                            class="bg-primary flex size-6 items-center justify-center rounded-full text-xs text-white"
+                                            >{{
+                                                (
+                                                    card.assigneeName || "?"
+                                                ).substring(0, 1)
+                                            }}</span
+                                        >
+                                    </span>
                                 </span>
-                                <!-- The card's own meta line, as on the board. -->
+                <!-- The card's own line, as on the board: what it is, then
+                     what it holds. The labels are also why the hit is here at
+                     all, when the word that matched was one of them. -->
                                 <span
                                     v-if="cardHasMeta(card)"
-                                    class="mt-1 flex flex-wrap items-center gap-x-3 pl-8 text-sm text-gray"
+                                    class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 pl-8 text-sm text-gray"
                                 >
+                                    <span
+                                        v-if="card.labels?.length"
+                                        class="flex flex-wrap items-center gap-1"
+                                    >
+                                        <span
+                                            v-for="label in card.labels"
+                                            :key="label.id"
+                                            class="label-pill"
+                                            >{{ label.name }}</span
+                                        >
+                                    </span>
                                     <span
                                         v-if="card.checklist?.total"
                                         class="flex shrink-0 gap-x-1.5"
@@ -279,27 +302,6 @@
                                         <span class="shrink-0 grow-0">{{
                                             dueDateLabel(card.dueDate)
                                         }}</span>
-                                    </span>
-                                    <span
-                                        v-if="card.assignee"
-                                        class="ml-auto shrink-0"
-                                        :title="card.assigneeName || ''"
-                                    >
-                                        <img
-                                            v-if="card.assigneeImage"
-                                            :src="card.assigneeImage"
-                                            :alt="card.assigneeName || ''"
-                                            class="size-6 rounded-full object-cover"
-                                        />
-                                        <span
-                                            v-else
-                                            class="flex size-6 items-center justify-center rounded-full bg-primary text-xs text-white"
-                                            >{{
-                                                (
-                                                    card.assigneeName || "?"
-                                                ).substring(0, 1)
-                                            }}</span
-                                        >
                                     </span>
                                 </span>
                                 <!-- Which board and area it sits on: the one
@@ -419,11 +421,11 @@ const { formatServerDate } = useServerDate();
 // Mirrors the card tile: the same fields, the same short format, and the same
 // emphasis on a due date that has passed.
 const cardHasMeta = (card: any) =>
+    card.labels?.length ||
     card.checklist?.total ||
     card.commentCount ||
     card.attachmentCount ||
-    card.dueDate ||
-    card.assignee;
+    card.dueDate;
 
 const isOverdue = (dueDate: string) =>
     !!dueDate && new Date(dueDate).getTime() < Date.now();

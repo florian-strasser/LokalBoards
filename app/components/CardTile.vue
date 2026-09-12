@@ -18,39 +18,68 @@
             >
                 <Check v-if="props.card.status" class="size-4" />
             </div>
-            <div class="shrink grow">
+            <div class="min-w-0 shrink grow">
                 <h3 class="font-bold">
                     {{ props.card.name }}
                 </h3>
             </div>
-        </div>
-        <!-- Labels sit on their own line under the name, indented to the same
-             gutter as the counts below: what the card is, before what it has. -->
-        <div
-            v-if="props.card.labels?.length"
-            class="pl-8 mt-1 flex flex-wrap gap-1"
-        >
-            <span
-                v-for="label in props.card.labels"
-                :key="label.id"
-                class="label-pill"
-                >{{ label.name }}</span
+            <!-- Who it is on, level with the name rather than down among the
+                 counts. A card that says nothing but who is doing it used to
+                 open a whole second row to hold one avatar, and on a card that
+                 does have counts the avatar was the width that pushed them onto
+                 a line of their own. Up here it costs nothing either way, and it
+                 is the first thing you look for. -->
+            <div
+                v-if="props.card.assignee"
+                class="shrink-0 grow-0"
+                v-tooltip="props.card.assigneeName || ''"
             >
+                <img
+                    v-if="props.card.assigneeImage"
+                    :src="props.card.assigneeImage"
+                    class="w-6 h-6 rounded-full object-cover"
+                    :alt="props.card.assigneeName || ''"
+                />
+                <div
+                    v-else
+                    class="w-6 h-6 rounded-full bg-primary text-white flex items-center justify-center text-xs"
+                >
+                    {{ (props.card.assigneeName || "?").substring(0, 1) }}
+                </div>
+            </div>
         </div>
+        <!-- One line under the name for everything the card has to say about
+             itself: what it is, then what it holds. Labels had a line of their
+             own, which made a tile with a label and a due date three rows tall
+             for two short facts. They wrap together now, and a tile is two rows
+             unless there is genuinely too much for one. -->
         <div
             v-if="
+                props.card.labels?.length ||
                 props.card.commentCount ||
                 props.card.attachmentCount ||
                 checklist.total ||
                 props.card.dueDate ||
-                props.card.assignee ||
                 props.viewers.length
             "
-            class="pl-8 mt-1 flex items-center text-sm gap-x-3 flex-wrap text-gray"
+            class="pl-8 mt-1 flex items-center text-sm gap-x-2 gap-y-1 flex-wrap text-gray"
         >
-            <!-- Who has this card open right now (excluding yourself). Sits
-                 with the other card info on the left; the assignee stays on
-                 the right so the two are never confused. -->
+            <!-- Tighter among themselves than they are from the counts, so the
+                 two read as two groups rather than one list. -->
+            <span
+                v-if="props.card.labels?.length"
+                class="flex flex-wrap items-center gap-1"
+            >
+                <span
+                    v-for="label in props.card.labels"
+                    :key="label.id"
+                    class="label-pill"
+                    >{{ label.name }}</span
+                >
+            </span>
+            <!-- Who has this card open right now (excluding yourself). Not to
+                 be confused with who it is assigned to, which is up beside the
+                 name. -->
             <PresenceAvatars
                 v-if="props.viewers.length"
                 :users="props.viewers"
@@ -92,26 +121,6 @@
             >
                 <Clock class="size-4 shrink-0 grow-0" />
                 <span class="shrink-0 grow-0">{{ dueDateLabel }}</span>
-            </div>
-            <div class="ml-auto flex shrink-0 items-center gap-2">
-                <div
-                    v-if="props.card.assignee"
-                    class="shrink-0"
-                    v-tooltip="props.card.assigneeName || ''"
-                >
-                    <img
-                        v-if="props.card.assigneeImage"
-                        :src="props.card.assigneeImage"
-                        class="w-6 h-6 rounded-full object-cover"
-                        :alt="props.card.assigneeName || ''"
-                    />
-                    <div
-                        v-else
-                        class="w-6 h-6 rounded-full bg-primary text-white flex items-center justify-center text-xs"
-                    >
-                        {{ (props.card.assigneeName || "?").substring(0, 1) }}
-                    </div>
-                </div>
             </div>
         </div>
     </button>

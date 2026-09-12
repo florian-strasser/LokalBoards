@@ -1,5 +1,6 @@
 import { defineEventHandler, readBody, getQuery } from "h3";
 import { setupDatabase } from "../../../app/lib/databaseSetup";
+import { removeAreaCompletely } from "../../utils/boardCleanup";
 import { getServerSocket } from "../../utils/socket";
 
 export default defineEventHandler(async (event) => {
@@ -168,24 +169,9 @@ export default defineEventHandler(async (event) => {
           return { message: "Area archived successfully" };
         }
 
-        // Everything belonging to the cards in this area goes with them — see
-        // `removeCardData`. The card ids are read first, because once the cards
-        // are gone there is no way to find what belonged to them.
-        await removeCardData(db, await cardIdsInAreas(db, [Number(id)]));
-
-        const [results] = await db.execute("DELETE FROM cards WHERE area = ?", [
-          id,
-        ]);
-
-        // Delete the area
-        const [result] = await db.execute("DELETE FROM areas WHERE id = ?", [
-          id,
-        ]);
-
-        if (result.affectedRows === 0) {
-          event.res.statusCode = 404;
-          return { error: "Area not found or already deleted" };
-        }
+        // The area with every card in it. The same call the nightly archive
+        // sweep makes, so the two can never mean different things.
+        await removeAreaCompletely(db, Number(id));
 
         // Emit socket event for area deletion (API calls only)
         if (auth.viaApiKey) {

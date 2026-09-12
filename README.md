@@ -73,6 +73,9 @@ NUXT_APP_NAME=LokalBoards
 NUXT_BOARDS_URL=http://localhost:3000
 NUXT_LANGUAGE=en
 NUXT_PUBLIC_PRIVACY_URL=https://www.yourdomain.com/privacy-policy/
+# How long archived boards, areas and cards are kept before they are deleted
+# for good. 30 days by default; 0 keeps them for ever.
+NUXT_ARCHIVE_RETENTION_DAYS=30
 
 # DB
 NUXT_MYSQL_HOST=localhost

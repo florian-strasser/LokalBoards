@@ -1,6 +1,7 @@
 import { defineEventHandler, readBody, getQuery } from "h3";
 import { setupDatabase } from "../../../app/lib/databaseSetup";
 import { getServerSocket } from "../../utils/socket";
+import { removeBoardCompletely } from "../../utils/boardCleanup";
 // The same parser the tile and the picker use, so a colour cannot be stored in
 // a form the UI would then refuse to render.
 import { normalizeBoardColor } from "../../../app/utils/boardColor";
@@ -212,37 +213,10 @@ export default defineEventHandler(async (event) => {
       }
 
       // Delete all invitations associated with the board
-      await db.execute("DELETE FROM invitations WHERE board = ?", [id]);
-      await db.execute("DELETE FROM `webhooks` WHERE board = ?", [id]);
-      await db.execute("DELETE FROM `board_placements` WHERE board = ?", [id]);
-
-      // Delete all notifications associated with the cards in the board's areas
-      await db.execute(`DELETE FROM notifications WHERE boardId = ?`, [id]);
-
-      // Everything belonging to every card on the board — comments,
-      // attachments and their files, reminders, activity. Read the ids before
-      // the cards go, or there is no way to find what was theirs.
-      await removeCardData(db, await cardIdsInBoard(db, id));
-
-      // Delete all cards associated with the board's areas
-      await db.execute(
-        "DELETE FROM cards WHERE area IN (SELECT id FROM areas WHERE board = ?)",
-        [id],
-      );
-
-      // Delete all areas associated with the board
-      await db.execute("DELETE FROM areas WHERE board = ?", [id]);
-
-      // And the board's own labels. The assignments themselves went with the
-      // cards, in `removeCardData` above.
-      await db.execute("DELETE FROM `labels` WHERE `board` = ?", [id]);
-
-      // Delete the board
-      const [result] = await db.execute("DELETE FROM boards WHERE id = ?", [
-        id,
-      ]);
-
-      if (result.affectedRows === 0) {
+      // The board with everything on it. The same call the nightly archive
+      // sweep makes, so what a person destroys here and what the sweep destroys
+      // on its own cannot drift apart.
+      if (!(await removeBoardCompletely(db, Number(id)))) {
         event.res.statusCode = 404;
         return { error: "Resource not found or already deleted" };
       }

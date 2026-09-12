@@ -21,6 +21,7 @@
                 show-menu
                 @settings="openSettings"
                 @invite="openInvite"
+                @duplicate="askDuplicateBoard"
                 @delete="askDeleteBoard"
                 @leave="askLeaveBoard"
             />
@@ -105,6 +106,7 @@
                         show-menu
                         @settings="openSettings"
                         @invite="openInvite"
+                        @duplicate="askDuplicateBoard"
                         @delete="askDeleteBoard"
                         @leave="askLeaveBoard"
                     />
@@ -171,6 +173,13 @@
                 @invitations-changed="onInvitationsChanged"
             />
         </ModalWindow>
+        <DuplicateBoardModal
+            v-if="activeBoard"
+            v-model="duplicateBoardModal"
+            :boardID="activeBoard.id"
+            :sourceName="activeBoard.name"
+            @duplicated="onDuplicated"
+        />
         <ModalWindow v-model="deleteBoardModal">
             <h2 class="text-4xl text-dark dark:text-white mb-3">
                 {{ $t("deleteBoardTitle") }}
@@ -529,6 +538,7 @@ const activeBoard = computed(
 const settingsModal = ref(false);
 const inviteModal = ref(false);
 const deleteBoardModal = ref(false);
+const duplicateBoardModal = ref(false);
 const leaveBoardModal = ref(false);
 const invitations = ref<any[]>([]);
 
@@ -564,6 +574,13 @@ const openInvite = async (id: number) => {
     }
     await openForBoard(id, inviteModal);
 };
+
+const askDuplicateBoard = (id: number) =>
+    openForBoard(id, duplicateBoardModal);
+
+// The copy is the caller's own board, and the point of making it is to start
+// filling it in — so it opens.
+const onDuplicated = (board: any) => navigateTo(`/board/${board.id}`);
 
 const askDeleteBoard = (id: number) => openForBoard(id, deleteBoardModal);
 

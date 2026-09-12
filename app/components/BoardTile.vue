@@ -90,6 +90,14 @@
                             </button>
                             <button
                                 type="button"
+                                :class="menuItemClass"
+                                @click="emit('duplicate', props.id)"
+                            >
+                                <CopyPlus class="size-4 shrink-0" />
+                                {{ $t("duplicateBoard") }}
+                            </button>
+                            <button
+                                type="button"
                                 :class="menuItemDestructiveClass"
                                 @click="emit('delete', props.id)"
                             >
@@ -198,7 +206,7 @@ const props = defineProps({
 });
 
 // The board id, so whoever holds the dialogs knows which board was asked about.
-const emit = defineEmits(["settings", "invite", "delete", "leave"]);
+const emit = defineEmits(["settings", "invite", "duplicate", "delete", "leave"]);
 
 // The board page's and the dashboard's menu items, to the letter.
 const menuItemClass =

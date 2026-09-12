@@ -190,6 +190,20 @@ const editor = useEditor({
             enableEmoticons: true,
         }),
         FileHandler.configure({
+            // Take the paste and stop, rather than uploading the image and
+            // letting the editor paste the clipboard's HTML on top of it.
+            //
+            // "Copy image" in a browser puts two things on the clipboard: the
+            // picture itself, and a scrap of `text/html` holding an `<img>` that
+            // points back where it came from. Without this the handler below
+            // uploads the file *and* returns the paste to ProseMirror, which
+            // then inserts that `<img>` as well — two pictures, of which only
+            // the uploaded one survives a save, because the other one points at
+            // a page that is not ours.
+            //
+            // The handler only ever sees pastes that carry a file of an allowed
+            // type, so text and HTML on their own paste exactly as before.
+            consumePasteEvent: true,
             allowedMimeTypes: [
                 "image/png",
                 "image/jpg",

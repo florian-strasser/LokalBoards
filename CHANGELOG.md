@@ -1,3 +1,45 @@
+## v0.37.0
+
+### Breaking
+
+- **Archived boards, areas and cards are deleted for good after 30 days.** Archiving replaced deleting in v0.36.0, and the archive kept everything for ever: every card anybody threw away, with its attachments and the files behind them, held until somebody went looking for the bin and pressed a second button. It empties itself now. The clock starts when a thing was archived, and a card that goes takes its attachments and their files with it.
+
+  **To keep the old behaviour, set `NUXT_ARCHIVE_RETENTION_DAYS=0`** before updating. That keeps archived things for ever, exactly as v0.36.0 did. Any other number sets the window — `90` for a quarter, say. Thirty days is the default because it is what a recycle bin usually keeps: long enough that a mistake is recoverable well after anybody notices it, short enough that an instance does not quietly fill with work somebody threw away last year.
+
+  A value that cannot be read falls back to 30 rather than to zero. A typo in an environment variable should not quietly turn the sweep off, and should certainly not be read as "delete immediately".
+
+  Anything already sitting in an archive from v0.36.0 is subject to the window as soon as this version runs, dated from when it was archived — so an instance that has been archiving for a while will lose the oldest of it on the first night. If that matters, set the variable to `0` first and look through **⋮ › Archive** before turning it on.
+
+  The archive itself now says how long it keeps things, so the rule is visible where it applies rather than discovered a month later. The sweep runs nightly and destroys things through exactly the same code the archive's own bin uses — that code had been sitting inline in the two endpoints that held it, and is one place now, because two copies of "everything a board owns" would drift and the half that drifted would leak rows and files nobody can see any more.
+
+### New Features
+
+- **ChatGPT can connect now: LokalBoards speaks OAuth.** Custom connectors in ChatGPT offer OAuth or no authentication at all — an API key is not among the options — so until now a LokalBoards instance simply could not be added to the assistant most people have open. It can be. Point a connector at `https://boards.example.com/mcp`, leave the client configuration empty, and the rest happens on its own: ChatGPT is refused, reads where to look, finds this instance's authorization server, sends you here to sign in, and asks whether to allow it.
+
+  Your instance is the authorization server. There is nothing to configure, no second service to run and no keys to manage — a request to `/mcp` without credentials now answers with a challenge naming its own metadata, and two well-known documents describe the rest. A client identifies itself by publishing a metadata document at an HTTPS URL that *is* its client identifier, which is what the specification now prefers and what ChatGPT leads with; the older dynamic registration, which the specification marks deprecated, still works for clients that only know that way.
+
+  The consent screen names the application, says what it will be able to do and whose account it will act as. The two permissions are the ones an API key already has, so a token changes nothing about how the tools behave: a connector that asked to write can be given read-only access instead, from that screen. **Settings › Connected apps** lists what you have allowed and disconnects it, which revokes its tokens at once.
+
+  Access tokens last an hour and refresh tokens thirty days, rotated on every use. Tokens are stored hashed, as API keys are. A code offered twice revokes everything it produced, on the grounds that a replay and a client bug look identical and only one of them is safe to assume. A token is only ever valid for this instance's own MCP endpoint, checked on every request — which is the confused-deputy problem the specification spends most of its security section on. API keys are untouched and keep working exactly as before.
+
+- **Duplicate a board's structure.** **⋮ › Duplicate board**, on the board itself or on its tile on the dashboard, makes a new board with the same columns and none of the cards. Most boards start life as the same three or four columns — Todo, Zur Vorlage, Erledigt — and building them by hand every time is the part worth skipping.
+
+  It asks for the name first, with the original's selected so typing replaces it: a board is duplicated because the next one starts the same way, and that next one already has a name in mind. The copy keeps the style and the colour, belongs to whoever asked for it rather than to whoever owned the original, and is private whatever the original was. Archived columns stay behind — they are not part of the board's shape any more. Seeing a board is enough to take a copy of its shape, since the copy is a board of your own holding nothing but column names.
+
+### Improvements
+
+- **A card's tile is two rows again.** It had grown to three or four: the assignee's avatar sat in the row of counts at the bottom, and the labels had a row of their own above it — so a card with one label and a due date was three rows tall for two short facts, and a card carrying nothing but an assignee opened a whole row to hold one avatar.
+
+  The avatar is level with the card's name now, where it is the first thing you look for, and the labels wrap together with the counts on the one line below: what the card is, then what it holds. A tile only goes to a third row when it genuinely has more than fits — a label, a checklist, comments, attachments and a due date all at once. A search result draws a card the same way and got the same treatment.
+
+- **The demo data behind the screenshots has labels, and every card with somebody on it also says when.** The guide was illustrating the labels chapter with boards that had none, and the filter with a menu that had no labels to offer. The cards assigned to somebody but carrying nothing else were the ones showing off that empty row.
+
+### Fixes
+
+- **A copied image pasted into a card arrived twice, and the second one broke on saving.** "Copy image" in a browser puts two things on the clipboard: the picture itself, and a scrap of `text/html` holding an `<img>` that points back at the page it came from. The editor uploaded the file and inserted it — and then handed the paste back to the editor, which inserted that `<img>` as well. Both showed while the description was open, because the page they pointed at was still serving them; only the uploaded one survived the save, so the card was left with a picture and a broken one beside it.
+
+  The paste is now taken and finished with, rather than acted on and passed along. Only pastes that actually carry a picture are affected — text and HTML on their own paste exactly as before, images included, so copying a paragraph with pictures in it from a web page still brings those pictures along as links to where they live.
+
 ## v0.36.0
 
 ### New Features

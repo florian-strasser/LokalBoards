@@ -1,6 +1,7 @@
 import { defineEventHandler, getQuery, readBody } from "h3";
 import { setupDatabase } from "../../../app/lib/databaseSetup";
 import { notifyDashboards } from "../../utils/dashboardNotify";
+import { retentionDays } from "../../utils/archiveRetention";
 
 // What has been put away, and how to get it back.
 //
@@ -46,7 +47,7 @@ export default defineEventHandler(async (event) => {
           "SELECT `id`, `name`, `archivedAt` FROM `boards` WHERE `user` = ? AND `archivedAt` IS NOT NULL ORDER BY `archivedAt` DESC",
           [userId],
         );
-        return { boards };
+        return { boards, retentionDays: retentionDays() };
       }
 
       const board = await boardOf(db, query.boardId);
@@ -83,7 +84,7 @@ export default defineEventHandler(async (event) => {
         [board.id],
       );
 
-      return { areas, cards };
+      return { areas, cards, retentionDays: retentionDays() };
     }
 
     if (method === "POST") {

@@ -84,6 +84,14 @@
                             </button>
                             <button
                                 type="button"
+                                @click="duplicateModal = true"
+                                :class="menuItemClass"
+                            >
+                                <CopyPlus class="size-4 shrink-0" />
+                                {{ $t("duplicateBoard") }}
+                            </button>
+                            <button
+                                type="button"
                                 @click="archiveModal = true"
                                 :class="menuItemClass"
                             >
@@ -370,6 +378,12 @@
         <ModalWindow v-if="userID === boardUser" v-model="inviteModal">
             <InviteModal :boardID="boardID" :invitations="invitations" />
         </ModalWindow>
+        <DuplicateBoardModal
+            v-model="duplicateModal"
+            :boardID="boardID * 1"
+            :sourceName="boardName"
+            @duplicated="(board) => navigateTo(`/board/${board.id}`)"
+        />
         <ArchiveModal
             v-model="archiveModal"
             :boardID="boardID * 1"
@@ -425,6 +439,7 @@ import Sortable from "sortablejs";
 import {
     Archive,
     ArchiveRestore,
+    CopyPlus,
     Pencil,
     UserRoundPlus,
     Ban,
@@ -919,6 +934,7 @@ const handleDeleteArea = async (areaId) => {
 
 // Fetch cards for a specific area
 const archiveModal = ref(false);
+const duplicateModal = ref(false);
 
 // Re-read the board's columns and their cards. Used when something comes back
 // out of the archive, which can put back a whole column at once.

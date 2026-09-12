@@ -1202,6 +1202,92 @@ const migrations: Migration[] = [
     },
   },
 
+  {
+    // LokalBoards as an OAuth authorization server, so that MCP clients which
+    // will not send an API key can still reach `/mcp`.
+    //
+    // ChatGPT is the reason this exists: it speaks OAuth and nothing else, so
+    // an instance that only accepts `x-api-key` is simply unreachable from the
+    // largest assistant on the market. The MCP authorization spec asks a server
+    // to be both an authorization server and a resource server; these four
+    // tables are the authorization server's memory.
+    //
+    // Tokens are stored as SHA-256 hashes, exactly as API keys are: a database
+    // that leaks should not hand over working credentials.
+    id: "0028_oauth_authorization_server",
+    up: async (db) => {
+      // A client is either a Client ID Metadata Document — an HTTPS URL that is
+      // itself the client_id, fetched and re-fetched from the client's own
+      // server — or one registered dynamically. The spec now prefers the first
+      // and calls the second deprecated; both are kept, because clients in the
+      // field still use both.
+      await db.execute(`CREATE TABLE IF NOT EXISTS \`oauth_clients\` (
+        \`id\` varchar(255) COLLATE utf8mb4_general_ci NOT NULL,
+        \`name\` varchar(255) COLLATE utf8mb4_general_ci NOT NULL,
+        \`redirectUris\` text COLLATE utf8mb4_general_ci NOT NULL,
+        \`tokenEndpointAuthMethod\` varchar(32) COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'none',
+        \`registration\` varchar(16) COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'cimd',
+        \`jwksUri\` varchar(512) COLLATE utf8mb4_general_ci DEFAULT NULL,
+        \`secretHash\` varchar(64) COLLATE utf8mb4_general_ci DEFAULT NULL,
+        \`uri\` varchar(512) COLLATE utf8mb4_general_ci DEFAULT NULL,
+        \`logoUri\` varchar(512) COLLATE utf8mb4_general_ci DEFAULT NULL,
+        \`createdAt\` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`refreshedAt\` datetime DEFAULT NULL,
+        PRIMARY KEY (\`id\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;`);
+
+      // An authorization code lives for a minute and is spent once. `usedAt`
+      // rather than a delete, so a code replayed after it was spent can be
+      // recognised as a replay and take its whole token family with it.
+      await db.execute(`CREATE TABLE IF NOT EXISTS \`oauth_codes\` (
+        \`codeHash\` varchar(64) COLLATE utf8mb4_general_ci NOT NULL,
+        \`clientId\` varchar(255) COLLATE utf8mb4_general_ci NOT NULL,
+        \`userId\` varchar(255) COLLATE utf8mb4_general_ci NOT NULL,
+        \`redirectUri\` varchar(512) COLLATE utf8mb4_general_ci NOT NULL,
+        \`scope\` varchar(255) COLLATE utf8mb4_general_ci NOT NULL,
+        \`codeChallenge\` varchar(128) COLLATE utf8mb4_general_ci NOT NULL,
+        \`resource\` varchar(512) COLLATE utf8mb4_general_ci DEFAULT NULL,
+        \`expiresAt\` datetime NOT NULL,
+        \`usedAt\` datetime DEFAULT NULL,
+        PRIMARY KEY (\`codeHash\`),
+        KEY \`oauth_codes_expires\` (\`expiresAt\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;`);
+
+      // `resource` is what the token is good for, recorded at issue time and
+      // checked on every request: a token minted for somewhere else must not
+      // work here, which is the whole point of RFC 8707.
+      await db.execute(`CREATE TABLE IF NOT EXISTS \`oauth_tokens\` (
+        \`id\` int NOT NULL AUTO_INCREMENT,
+        \`accessHash\` varchar(64) COLLATE utf8mb4_general_ci NOT NULL,
+        \`refreshHash\` varchar(64) COLLATE utf8mb4_general_ci DEFAULT NULL,
+        \`clientId\` varchar(255) COLLATE utf8mb4_general_ci NOT NULL,
+        \`userId\` varchar(255) COLLATE utf8mb4_general_ci NOT NULL,
+        \`scope\` varchar(255) COLLATE utf8mb4_general_ci NOT NULL,
+        \`resource\` varchar(512) COLLATE utf8mb4_general_ci DEFAULT NULL,
+        \`expiresAt\` datetime NOT NULL,
+        \`refreshExpiresAt\` datetime DEFAULT NULL,
+        \`revokedAt\` datetime DEFAULT NULL,
+        \`createdAt\` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`lastUsedAt\` datetime DEFAULT NULL,
+        PRIMARY KEY (\`id\`),
+        UNIQUE KEY \`oauth_tokens_access\` (\`accessHash\`),
+        KEY \`oauth_tokens_refresh\` (\`refreshHash\`),
+        KEY \`oauth_tokens_user\` (\`userId\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;`);
+
+      // What somebody has already agreed to, so the second connection from a
+      // client they have already approved does not ask again for the same
+      // thing. Asking for more than last time does ask again.
+      await db.execute(`CREATE TABLE IF NOT EXISTS \`oauth_consents\` (
+        \`userId\` varchar(255) COLLATE utf8mb4_general_ci NOT NULL,
+        \`clientId\` varchar(255) COLLATE utf8mb4_general_ci NOT NULL,
+        \`scope\` varchar(255) COLLATE utf8mb4_general_ci NOT NULL,
+        \`createdAt\` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`userId\`, \`clientId\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;`);
+    },
+  },
+
   // To add a further schema change, append a new migration here, e.g.:
   // {
   //   id: "0015_add_x",

@@ -11,6 +11,13 @@
         <p v-if="loading" class="text-gray">…</p>
         <p v-else-if="!anything" class="text-gray">{{ $t("archiveEmpty") }}</p>
 
+        <!-- Said plainly, because the archive empties itself: somebody deciding
+             whether it is safe to archive a column should not have to find that
+             out a month later. -->
+        <p v-if="!loading && retention > 0" class="text-gray mb-6 text-sm">
+            {{ $t("archiveRetentionNotice", { days: retention }) }}
+        </p>
+
         <section
             v-for="group in groups"
             :key="group.type"
@@ -98,6 +105,7 @@ const loading = ref(false);
 const areas = ref<any[]>([]);
 const cards = ref<any[]>([]);
 const boards = ref<any[]>([]);
+const retention = ref(0);
 
 const groups = computed(() =>
     [
@@ -117,6 +125,7 @@ const load = async () => {
         areas.value = data?.areas ?? [];
         cards.value = data?.cards ?? [];
         boards.value = data?.boards ?? [];
+        retention.value = Number(data?.retentionDays ?? 0);
     } catch (err) {
         console.error("Could not read the archive:", err);
     } finally {

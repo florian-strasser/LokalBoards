@@ -9,6 +9,7 @@
             </h2>
             <PasswordForm />
             <ApiList />
+            <ConnectedApps />
             <WebhookList />
         </ContentWrapper>
     </div>
