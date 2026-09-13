@@ -1,3 +1,31 @@
+## v0.38.0
+
+### New Features
+
+- **Export a board, or everything.** **⋮ › Export board** downloads a board as a zip: a JSON file holding every area and card — descriptions, labels, due dates, assignees, reminders, comments and history — and an `attachments` folder with the files the cards hold, pictures pasted into descriptions and comments included. Archived areas and cards come along, each marked with when it was archived. Anybody who can see a board can export it; the file carries people's names, not their email addresses.
+
+  Administrators get **⋮ › Export all data** on the users page: one zip with every board's JSON, each board's files in a folder of its own, and `database.sql` — the whole database as SQL that restores with `mysql <database> < database.sql`. The app writes the SQL itself, so making one needs no MySQL client and no shell on the server, and an administrator's API key can fetch it from `/api/data/export` for a scheduled job. Sign-in sessions and verification codes are left out of the dump, so everybody signs in again after a restore. The zip holds every account's password hash: keep it the way you keep the database.
+
+  The board file's format is described under [Export](https://www.lokalboards.com/api/export#the-board-file) in the API reference.
+
+- **A filtered board is a link.** The filter lives in the address now — `?labels=3&assignee=none&due=overdue&status=open` — so a board narrowed down to what matters can be sent to somebody and opens that way for them. Picking filters replaces the address rather than adding to the browser's history, so **Back** still leaves the board instead of stepping through every chip you tried. A value the board does not recognise is ignored, and the link still opens.
+
+- **My work.** The dashboard's heading is a switch: **Boards** and **My work**. My work lists the open cards assigned to you on every board you are on, grouped into **Overdue**, **This week** and **Later**, each with the board and area it sits on; click one and it opens on its board. Done and archived cards stay out of it, and so does anything on a board you have left. It has its own address, `/dashboard/?view=mine`, and no new entry in the navigation. On a phone, where the two names do not fit side by side, the heading names the view you are in and the switch sits under it.
+
+### Improvements
+
+- **⋮ › Archive is called ⋮ › Recently archived**, on a board and on the dashboard. Next to **Archive board** the old name read like a second way to do the same thing, when it is where archived things wait to be restored.
+
+### Fixes
+
+- **A board tile's menu showed Duplicate board without its icon**, and **Archive board** with a bin. The first was never imported; the second was left over from when that entry deleted the board. It has the archive icon now, the same as in the board's own menu.
+
+- **Back left an empty dialog over the board.** With a card open, the browser's Back button took the card away and left its dialog behind: a blank white box over a dimmed board, catching every click until the page was reloaded. The address had changed and the card had closed; the dialog was never told. Back now closes it the way its own button does, and it matters more now that a board's address carries its filter and gets navigated back and forth.
+
+- **An area's card count went wrong after dragging a card out of it.** Drag a card from one area to another and both headers kept the numbers they had before — a column holding two cards said one, the column it left said two — until the page was reloaded. The filter's **3 / 12** was off in the same way.
+
+  It was only ever wrong for the person dragging. The drag library moves the card's element on the page itself, and the board's own record of which card is in which area was left as it was; the counts read that record, so they described the board as it had been. Moving a card from its dialog, or watching somebody else move one, already updated the record and was never affected. A drop now updates it too, through the same code those two use: the element is put back where the drag took it from, the record changes, and the board draws the move from that — rather than changing the record underneath a move already made and having it drawn a second time.
+
 ## v0.37.0
 
 ### Breaking

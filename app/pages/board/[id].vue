@@ -43,9 +43,10 @@
                     <!-- One menu instead of a row of icon buttons: it keeps the
                          header compact on small screens and new actions cost a
                          list entry rather than another icon to tell apart.
-                         The owner manages the board; everyone else can only
-                         show themselves out (a board needs its owner, so there
-                         is no "leave" for them — they delete it instead). -->
+                         The owner manages the board; everyone else can take a
+                         copy of it and show themselves out (a board needs its
+                         owner, so there is no "leave" for them — they archive
+                         it instead). -->
                     <!-- The wrapper carries the one-line height that aligns
                          the button with the title's first line. ActionMenu's own
                          root must stay a plain block: its dropdown sets no `top`
@@ -90,6 +91,19 @@
                                 <CopyPlus class="size-4 shrink-0" />
                                 {{ $t("duplicateBoard") }}
                             </button>
+                        </template>
+                        <!-- For everybody who can see the board: every card
+                             and file in it is something they could already
+                             open one at a time. -->
+                        <button
+                            type="button"
+                            @click="exportBoard"
+                            :class="menuItemClass"
+                        >
+                            <Download class="size-4 shrink-0" />
+                            {{ $t("exportBoard") }}
+                        </button>
+                        <template v-if="userID === boardUser">
                             <button
                                 type="button"
                                 @click="archiveModal = true"
@@ -262,6 +276,7 @@
                                      where it looks like it landed. -->
                                 <CardTile
                                     v-for="card in cards[area.id]"
+                                    :key="card.id"
                                     :card="card"
                                     :class="{
                                         hidden:
@@ -430,16 +445,20 @@
 <script setup lang="ts">
 import { socket } from "~/lib/socket";
 import {
-    EMPTY_FILTER,
     assigneesOf,
+    filterFromQuery,
     isFiltering,
     matchesFilter,
+    sameFilter,
+    sameQuery,
+    withFilterQuery,
 } from "@/utils/boardFilter";
 import Sortable from "sortablejs";
 import {
     Archive,
     ArchiveRestore,
     CopyPlus,
+    Download,
     Pencil,
     UserRoundPlus,
     Ban,
@@ -541,11 +560,10 @@ watch(anyModalOpen, (open) => {
 const areas = ref([]);
 const cards = ref({});
 
-// What the board is currently showing. Held here, applied in the browser to the
-// cards already loaded, and deliberately not put in the address: a filter is
-// how you are looking at the board this minute, not a place you meant to link
-// somebody to.
-const boardFilter = ref({ ...EMPTY_FILTER });
+// What the board is currently showing. Held here and applied in the browser to
+// the cards already loaded — and kept in the address, so a filtered board is a
+// link that opens filtered. See the watchers beside the card's own parameter.
+const boardFilter = ref(filterFromQuery(route.query));
 const filtering = computed(() => isFiltering(boardFilter.value));
 const cardVisible = (card) => matchesFilter(card, boardFilter.value);
 const visibleCount = (areaId) =>
@@ -689,6 +707,27 @@ const writeAccess = ref(false);
 
 const router = useRouter();
 
+// The filter and the address follow each other. Changing the filter replaces
+// the address rather than adding to the history, so Back leaves the board
+// instead of taking the chips off one at a time; changing the address — Back
+// itself, or a filtered link to this board followed while it is open — sets
+// the filter.
+watch(boardFilter, (filter) => {
+    const query = withFilterQuery(route.query, filter);
+    if (!sameQuery(query, route.query)) router.replace({ query });
+});
+watch(
+    () => route.query,
+    (query) => {
+        const incoming = filterFromQuery(query);
+        if (!sameFilter(incoming, boardFilter.value))
+            boardFilter.value = incoming;
+    },
+);
+
+const exportBoard = () =>
+    startDownload(`/api/data/board-export?boardId=${boardID.value}`);
+
 // Sync cardModal with query param
 if (route.query.card) {
     cardModal.value = route.query.card * 1;
@@ -724,15 +763,24 @@ watch(cardModal, (newVal, oldVal) => {
 
 // Open/close the card modal when the `card` query changes without a full page
 // load — e.g. clicking a notification for a card on the board you're already
-// viewing (same route, so setup doesn't re-run). Guarded so it doesn't loop
-// with the watcher above that writes the query.
+// viewing (same route, so setup doesn't re-run), or Back with a card open.
+// Guarded so it doesn't loop with the watcher above that writes the query.
 watch(
     () => route.query.card,
     (card) => {
         const id = card ? card * 1 : false;
-        if (id !== cardModal.value) {
+        if (id === cardModal.value) return;
+        if (id) {
             cardModal.value = id;
-            if (id) setBodyScrollLock(true);
+            setBodyScrollLock(true);
+        } else if (cardModalOpen.value) {
+            // Closed the way the dialog's own button closes it: through the
+            // animation, which clears the id once it has run. Clearing the id
+            // here instead took the card out of a dialog that nothing told to
+            // close, and left an empty box over the board catching every click.
+            cardModalOpen.value = false;
+        } else {
+            cardModal.value = false;
         }
     },
 );
@@ -1294,12 +1342,43 @@ const initSort = () => {
                     touchStartThreshold: 5,
                     onEnd: async (event) => {
                         areaSnapSuspended.value = false;
+                        const cardId = event.item.dataset.cardId;
+                        const fromAreaId = areaIdOf(event.from);
+                        const toAreaId = areaIdOf(event.to);
+
+                        // SortableJS has already moved the element, but the
+                        // board's data still has the card where it started —
+                        // and everything that counts cards reads the data. The
+                        // area headers said a column held one card while it
+                        // plainly held two, and the filter's "3 / 12" was wrong
+                        // after every drag, for the person dragging only: a
+                        // move from the dialog, or one arriving from somebody
+                        // else, already changed the data and was fine.
+                        //
+                        // So the element goes back where it came from, the data
+                        // changes, and Vue renders the move — the same path those
+                        // two already take. Changing the data while leaving
+                        // SortableJS's move in place would have Vue render the
+                        // move a second time on top of it.
+                        event.item.remove();
+                        event.from.insertBefore(
+                            event.item,
+                            event.from.children[event.oldIndex] ?? null,
+                        );
+
                         if (event.from !== event.to) {
                             // Card moved to a different area
                             onboarding.advance("move-card");
-                            const cardId = event.item.dataset.cardId;
-                            const fromAreaId = areaIdOf(event.from);
-                            const toAreaId = areaIdOf(event.to);
+                            handleCardMoved({
+                                cardId,
+                                fromAreaId,
+                                toAreaId,
+                                newIndex: event.newIndex,
+                            });
+                            const moved = cards.value[toAreaId]?.find(
+                                (item) => Number(item.id) === Number(cardId),
+                            );
+                            if (moved) moved.area = Number(toAreaId);
 
                             try {
                                 await $fetch("/api/data/cardMove", {
@@ -1324,8 +1403,12 @@ const initSort = () => {
                             }
                         } else {
                             // Card moved within the same area
-                            const cardId = event.item.dataset.cardId;
-                            const areaId = areaIdOf(event.from);
+                            const areaId = fromAreaId;
+                            handleCardOrderd({
+                                areaId,
+                                cardId,
+                                newIndex: event.newIndex,
+                            });
 
                             try {
                                 await $fetch("/api/data/cardOrder", {

@@ -54,6 +54,8 @@ export default defineNuxtConfig({
     enabled: process.env.NUXT_MCP || true,
   },
   runtimeConfig: {
+    // Written into exports, so a board file says which version produced it.
+    appVersion: pkg.version,
     public: {
       privacyUrl: process.env.NUXT_PUBLIC_PRIVACY_URL || "/privacy-policy/",
       signup: process.env.NUXT_PUBLIC_SIGNUP || true,

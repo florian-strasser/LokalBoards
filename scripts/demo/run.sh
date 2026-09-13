@@ -81,6 +81,7 @@ DOCS_SHOTS="
 36-oauth-consent:oauth-consent
 34-modal-archive:archive
 35-board-filter:board-filter
+37-my-work:my-work
 "
 export DEMO_DB_HOST DEMO_DB_USER DEMO_DB_PASS DEMO_DB_NAME DEMO_TOKEN
 export DEMO_BASE_URL="http://127.0.0.1:${DEMO_PORT}"
@@ -192,6 +193,12 @@ for lang in $DEMO_LANGS; do
         fi
       done
 
+      # The social preview card carries the same board as the hero, so it is
+      # rendered from that capture here rather than left to go stale by hand.
+      if [ -f "$DEMO_OUT/$lang/$HERO_SHOT_VIEW.png" ]; then
+        echo "==> refreshing social preview card -> docs/public/images/og-card.png"
+        node scripts/demo/og-card.mjs "$DEMO_OUT/$lang/$HERO_SHOT_VIEW.png" docs/public/images/og-card.png >/dev/null
+      fi
       hero_done=1
     else
       echo "==> skipping screenshot refresh: cwebp not installed (brew install webp)"

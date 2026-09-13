@@ -186,7 +186,7 @@ try {
       await page.locator("header button, h1 ~ * button").last().click();
     });
   await page.waitForTimeout(400);
-  await page.locator("button", { hasText: /^\s*(Archiv|Archive)\s*$/ }).first().click();
+  await page.locator("button", { hasText: /^\s*(Zuletzt archiviert|Recently archived)\s*$/ }).first().click();
   await page.waitForTimeout(900);
   check("the archive view lists it", await page.locator('text=Findable card').count() > 0);
   await page.locator("button", { hasText: /Wiederherstellen|Restore/ }).first().click();

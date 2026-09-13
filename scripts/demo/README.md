@@ -32,7 +32,12 @@ The build runs on a spare port (`3100` by default) — it never touches `:3000`.
 3. For each language: starts the built server with `NUXT_LANGUAGE=<lang>`
    (seeding the data on the first run), then drives Chromium as the seeded admin
    (via the `session_token` cookie) through every page and modal.
-4. Writes the gallery `index.html` and drops the demo database.
+4. From the first language's captures, refreshes the images the website and the
+   README use (needs `cwebp`): the README screenshot, the homepage hero at
+   every width it is served in, the guide's screenshots in
+   `docs/public/images/docs`, and the social preview card
+   `docs/public/images/og-card.png`.
+5. Writes the gallery `index.html` and drops the demo database.
 
 ## Configuration (env vars)
 
@@ -52,6 +57,8 @@ The build runs on a spare port (`3100` by default) — it never touches `:3000`.
   Refuses to run unless the database name looks like a throwaway (`demo`/`test`).
 - `screenshots.mjs` — the Playwright capture (pages + modals).
 - `gallery.mjs` — builds the side-by-side `index.html`.
+- `og-card.mjs` — renders the 1200 × 630 social preview card from the board
+  capture, in the website's typeface and colours.
 - `mockup.png` — the demo image attachment.
 
 To add a view, add one `shot(...)` call in `screenshots.mjs` and a matching row

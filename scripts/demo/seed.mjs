@@ -101,6 +101,7 @@ await db.query(
     [4,2,"Design",0],
     [5,3,"This Week",0],
     [6,4,"Ideas",0],
+    [7,1,"Parking lot",3],
   ]],
 );
 
@@ -114,6 +115,10 @@ const richDesc =
   "- [ ] Team review";
 
 // --- Cards ---  [id, area, name, sort, content, status, dueDate, assignee]
+// Alex, whose account the screenshots use, has open work on every board they
+// are on and not only the hero board, so My work shows a card in each group:
+// overdue on Website Relaunch, this week on Personal Tasks and Product Roadmap,
+// later on Marketing Ideas. All dated, so no tile grows a row for an avatar.
 await db.query(
   "INSERT INTO `cards` (id,area,name,sort,content,status,dueDate,assignee) VALUES ?",
   [[
@@ -148,14 +153,25 @@ await db.query(
     [30,3,"Import boards from Trello",5,"Lists, cards, checklists, comments, attachments.",1,null,null],
     [31,3,"Move attachments to disk",6,"",1,null,null],
     [32,3,"Wire up the webhooks",7,"- [x] Signing\n- [x] Retries",1,days(-1),"u-ben"],
-    [8,4,"Website Relaunch: hero section",0,"Bold headline, product screenshot, one clear call to action.",0,null,null],
+    [8,4,"Website Relaunch: hero section",0,"Bold headline, product screenshot, one clear call to action.",0,days(-2),"u-alex"],
     [9,5,"Buy groceries",0,"Milk, bread, coffee.",0,null,null],
-    [10,5,"Call the dentist",1,"",0,days(1),null],
+    [10,5,"Call the dentist",1,"",0,days(1),"u-alex"],
     [11,5,"Finish the quarterly report",2,"Numbers are in the shared drive.",1,null,null],
-    [12,6,"Referral programme",0,"Give a month free for every friend invited.",0,null,null],
+    [12,6,"Referral programme",0,"Give a month free for every friend invited.",0,days(12),"u-alex"],
     [13,6,"Launch a newsletter",1,"",0,null,null],
+    [33,7,"Dark-mode logo variant",0,"",0,null,null],
+    [34,7,"Sticker sheet for the meetup",1,"",0,null,null],
+    [35,1,"Old pricing experiment",10,"Superseded by the three-tier plan.",0,null,null],
   ]],
 );
+
+// --- Archived work on board 1 ---
+// Neither is drawn on the board or counted in its headers, so the hero is
+// unchanged. They are what ⋮ › Recently archived lists in the guide's
+// screenshot, which otherwise showed an empty dialog under a caption promising
+// a list.
+await db.query("UPDATE `areas` SET `archivedAt` = UTC_TIMESTAMP() - INTERVAL 2 DAY WHERE `id` = 7");
+await db.query("UPDATE `cards` SET `archivedAt` = UTC_TIMESTAMP() - INTERVAL 5 HOUR WHERE `id` = 35");
 
 // --- Labels on board 1 ---
 // Words on cards rather than a palette to manage: the rows exist so the same

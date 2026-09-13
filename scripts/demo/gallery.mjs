@@ -13,12 +13,12 @@ const langLabel = { en: "English", de: "Deutsch", fr: "Français", es: "Español
 
 const views = [
   ["01-sign-in", "Sign in", "page"], ["02-sign-up", "Sign up", "page"], ["03-lost-password", "Lost password", "page"],
-  ["10-dashboard", "Dashboard", "page"], ["11-board-kanban", "Board — Kanban", "page"], ["12-board-todo", "Board — To-do list", "page"],
+  ["10-dashboard", "Dashboard", "page"], ["11-board-kanban", "Board — Kanban", "page"], ["12-board-todo", "Board — To-do list", "page"], ["37-my-work", "My work", "page"], ["40-board-kanban-mobile", "Board — phone", "page"],
   ["13-settings", "Settings", "page"], ["14-users", "Users (admin)", "page"], ["15-new-user", "New user", "page"], ["16-edit-user", "Edit user", "page"],
   ["20-modal-create-board", "Create board", "modal"], ["21-menu-actions", "Actions menu (⋮)", "modal"], ["32-menu-board-tile", "Board tile menu", "modal"], ["22-modal-trello-import", "Import from Trello", "modal"],
-  ["23-modal-board-options", "Board options", "modal"], ["24-modal-invite", "Invite user", "modal"], ["25-modal-delete-board", "Delete board", "modal"],
-  ["26-modal-card", "Card", "modal"], ["31-menu-card", "Card menu", "modal"], ["27-modal-image-lightbox", "Image lightbox", "modal"], ["28-modal-delete-area", "Delete area", "modal"], ["29-modal-delete-user", "Delete user", "modal"],
-  ["30-search", "Search", "modal"],
+  ["23-modal-board-options", "Board options", "modal"], ["24-modal-invite", "Invite user", "modal"], ["25-modal-delete-board", "Archive board", "modal"], ["33-modal-duplicate-board", "Duplicate board", "modal"], ["34-modal-archive", "Recently archived", "modal"], ["35-board-filter", "Board filter", "modal"],
+  ["26-modal-card", "Card", "modal"], ["31-menu-card", "Card menu", "modal"], ["27-modal-image-lightbox", "Image lightbox", "modal"], ["28-modal-delete-area", "Archive area", "modal"], ["29-modal-delete-user", "Delete user", "modal"],
+  ["30-search", "Search", "modal"], ["36-oauth-consent", "OAuth consent", "modal"],
 ];
 
 const cols = `repeat(${langs.length}, 1fr)`;

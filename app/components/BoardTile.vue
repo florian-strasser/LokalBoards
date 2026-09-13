@@ -101,7 +101,7 @@
                                 :class="menuItemDestructiveClass"
                                 @click="emit('delete', props.id)"
                             >
-                                <Trash2 class="size-4 shrink-0" />
+                                <Archive class="size-4 shrink-0" />
                                 {{ $t("deleteBoard") }}
                             </button>
                         </template>
@@ -178,10 +178,11 @@
 </template>
 <script setup lang="ts">
 import {
+    Archive,
+    Ban,
+    CopyPlus,
     Pencil,
     UserRoundPlus,
-    Trash2,
-    Ban,
 } from "lucide-vue-next";
 import { boardTextColor, normalizeBoardColor } from "@/utils/boardColor";
 const props = defineProps({

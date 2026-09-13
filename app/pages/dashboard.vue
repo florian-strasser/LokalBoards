@@ -8,7 +8,34 @@
                 onboardingTarget="new-board"
                 @sectionHeaderButtonClicked="openCreateBoard"
             >
-                {{ $t("boards") }}
+                <!-- Two views of the same work, side by side as two headings
+                     rather than one more entry in the navigation: the boards
+                     you are on, and the cards on you across all of them. Each
+                     has its own address, so My work can be bookmarked.
+
+                     Only from md up. Below that there is no room for both names
+                     at heading size — in Czech, German, French, Italian and
+                     Portuguese not even at 640 pixels — so a narrow screen names
+                     the view it is showing, and the switch sits under it. -->
+                <span class="md:hidden">{{
+                    myWork ? $t("myWork") : $t("boards")
+                }}</span>
+                <span
+                    class="hidden flex-wrap items-baseline gap-x-6 gap-y-1 md:flex"
+                >
+                    <NuxtLink
+                        to="/dashboard/"
+                        :class="viewClass(!myWork)"
+                        :aria-current="myWork ? undefined : 'page'"
+                        >{{ $t("boards") }}</NuxtLink
+                    >
+                    <NuxtLink
+                        to="/dashboard/?view=mine"
+                        :class="viewClass(myWork)"
+                        :aria-current="myWork ? 'page' : undefined"
+                        >{{ $t("myWork") }}</NuxtLink
+                    >
+                </span>
                 <template #actions>
                     <ActionMenu :tooltip="$t('moreOptions')">
                         <button
@@ -30,7 +57,21 @@
                     </ActionMenu>
                 </template>
             </SectionHeader>
-            <BoardDashboard v-if="session" @new-board="openCreateBoard" />
+            <div class="-mt-4 mb-8 md:hidden">
+                <SegmentedControl
+                    :values="[
+                        { value: 'boards', label: $t('boards') },
+                        { value: 'mine', label: $t('myWork') },
+                    ]"
+                    name="dashboardView"
+                    v-model="view"
+                />
+            </div>
+            <MyWork v-if="session && myWork" />
+            <BoardDashboard
+                v-else-if="session"
+                @new-board="openCreateBoard"
+            />
         </ContentWrapper>
         <!-- The boards this account has archived. A restored board comes back
              on its own: the server tells every dashboard it belongs on. -->
@@ -160,6 +201,20 @@ const { data: session } = await useFetch("/api/auth/get-session");
 const userID = session.value.data.user.id;
 const createBoard = ref(false);
 const archiveModal = ref(false);
+
+const route = useRoute();
+const myWork = computed(() => route.query.view === "mine");
+// The narrow layout's switch. Setting it goes to the view's address, so Back
+// and a bookmark behave the same whichever of the two was used.
+const view = computed({
+    get: () => (myWork.value ? "mine" : "boards"),
+    set: (value) =>
+        navigateTo(value === "mine" ? "/dashboard/?view=mine" : "/dashboard/"),
+});
+const viewClass = (active: boolean) =>
+    active
+        ? "text-dark dark:text-white"
+        : "text-gray hover:text-primary dark:hover:text-white";
 
 // Offer the first-run guided tour to accounts that haven't been onboarded yet.
 const onboarding = useOnboarding();

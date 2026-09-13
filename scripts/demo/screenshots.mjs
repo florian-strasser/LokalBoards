@@ -69,6 +69,12 @@ await shot(pub, "03-lost-password", "/lost-password");
 // --- Authenticated pages ---
 await shot(auth, "10-dashboard", "/dashboard");
 await shot(auth, "11-board-kanban", "/board/1");
+// My work: the dashboard's other view. The cards arrive after the page mounts
+// (the grouping needs the browser's own clock), so wait for them.
+await shot(auth, "37-my-work", "/dashboard/?view=mine", async (p) => {
+  await p.waitForSelector("[data-work-group]", { timeout: 10000 });
+  await p.waitForTimeout(400);
+});
 await shot(auth, "12-board-todo", "/board/3");
 await shot(auth, "13-settings", "/settings");
 await shot(auth, "14-users", "/users");
@@ -103,7 +109,7 @@ await shot(auth, "22-modal-trello-import", "/dashboard", async (p) => {
 // The board's actions live in a three-dots menu: open it, then pick the entry.
 // By position rather than by label, because these run in every language — so
 // the indices below are the menu's order, and adding an entry moves them:
-//   0 board settings · 1 invite · 2 duplicate · 3 archive · 4 archive board
+//   0 board settings · 1 invite · 2 duplicate · 3 export · 4 recently archived · 5 archive board
 const boardMenuItem = (index) => async (p) => {
   await p.click('button[aria-haspopup="menu"]');
   await p.waitForTimeout(300);
@@ -112,9 +118,9 @@ const boardMenuItem = (index) => async (p) => {
 };
 await shot(auth, "23-modal-board-options", "/board/1", boardMenuItem(0));
 await shot(auth, "24-modal-invite", "/board/1", boardMenuItem(1));
-await shot(auth, "25-modal-delete-board", "/board/1", boardMenuItem(4));
+await shot(auth, "25-modal-delete-board", "/board/1", boardMenuItem(5));
 await shot(auth, "33-modal-duplicate-board", "/board/1", boardMenuItem(2));
-await shot(auth, "34-modal-archive", "/board/1", boardMenuItem(3));
+await shot(auth, "34-modal-archive", "/board/1", boardMenuItem(4));
 // The filter, open, with one label picked so the shot shows both what it offers
 // and what it does to the counts in the column headers.
 await shot(auth, "35-board-filter", "/board/1", async (p) => {

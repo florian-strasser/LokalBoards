@@ -248,7 +248,14 @@ these two:
 
 ### Back up
 
-Database (adjust host/user/database to your config):
+The quickest way needs no shell: an administrator's **Users › ⋮ › Export all
+data** downloads one zip with every board as JSON, the uploaded files, and
+`database.sql` — the whole database, restorable with the `mysql` command below.
+A scheduled job can fetch the same zip from `/api/data/export` with an
+administrator's API key.
+
+From the command line instead — database (adjust host/user/database to your
+config):
 
 ```bash
 mysqldump -h "$NUXT_MYSQL_HOST" -u "$NUXT_MYSQL_USER" -p "$NUXT_MYSQL_DATABASE" \

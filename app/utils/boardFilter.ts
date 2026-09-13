@@ -120,3 +120,95 @@ export function assigneesOf(cards: any[], unassignedLabel: string): any[] {
     list.push({ id: UNASSIGNED, name: unassignedLabel, image: null });
   return list;
 }
+
+// ---------------------------------------------------------------------------
+// The filter in the address.
+//
+// A filtered board is a link: `?labels=3,7&assignee=none&due=overdue&status=open`
+// opens the board showing exactly that, so "everything overdue on the website"
+// can be sent to somebody as it stands. Labels are given by id, which is what
+// the board filters by; people by account id, with `none` for nobody.
+//
+// What arrives in an address was typed or pasted by somebody, so reading one
+// keeps what it recognises and drops the rest rather than failing: a link with
+// one bad value still opens the board, filtered by the good ones.
+
+export const FILTER_QUERY_KEYS = ["labels", "assignee", "due", "status"];
+
+const DUE_VALUES = ["overdue", "today", "week", "none"];
+const NOBODY = "none";
+
+const listOf = (value: unknown): string[] =>
+  (Array.isArray(value) ? value : [value])
+    .filter((entry): entry is string => typeof entry === "string")
+    .flatMap((entry) => entry.split(","))
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+
+export function filterToQuery(filter: BoardFilter): Record<string, string> {
+  const query: Record<string, string> = {};
+  if (filter.labels.length) query.labels = filter.labels.join(",");
+  if (filter.assignees.length)
+    query.assignee = filter.assignees
+      .map((id) => (id === UNASSIGNED ? NOBODY : id))
+      .join(",");
+  if (filter.due !== null) query.due = filter.due;
+  if (filter.done !== null) query.status = filter.done ? "done" : "open";
+  return query;
+}
+
+export function filterFromQuery(query: Record<string, unknown>): BoardFilter {
+  const labels = [
+    ...new Set(
+      listOf(query.labels)
+        .map(Number)
+        .filter((id) => Number.isInteger(id) && id > 0),
+    ),
+  ];
+  const assignees = [
+    ...new Set(
+      listOf(query.assignee)
+        .filter((id) => id.length <= 255)
+        .map((id) => (id === NOBODY ? UNASSIGNED : id)),
+    ),
+  ];
+  const due = listOf(query.due).find((value) => DUE_VALUES.includes(value));
+  const status = listOf(query.status)[0];
+  return {
+    labels,
+    assignees,
+    due: due ?? null,
+    done: status === "done" ? true : status === "open" ? false : null,
+  };
+}
+
+/** The address's other parameters as they were, with the filter's replaced. */
+export function withFilterQuery(
+  query: Record<string, unknown>,
+  filter: BoardFilter,
+): Record<string, unknown> {
+  const rest = Object.fromEntries(
+    Object.entries(query).filter(([key]) => !FILTER_QUERY_KEYS.includes(key)),
+  );
+  return { ...rest, ...filterToQuery(filter) };
+}
+
+export function sameFilter(a: BoardFilter, b: BoardFilter): boolean {
+  return (
+    JSON.stringify(filterToQuery(a)) === JSON.stringify(filterToQuery(b))
+  );
+}
+
+/** Whether two queries say the same thing, whatever order their keys are in. */
+export function sameQuery(
+  a: Record<string, unknown>,
+  b: Record<string, unknown>,
+): boolean {
+  const normal = (query: Record<string, unknown>) =>
+    JSON.stringify(
+      Object.entries(query)
+        .filter(([, value]) => value !== undefined)
+        .sort(([left], [right]) => left.localeCompare(right)),
+    );
+  return normal(a) === normal(b);
+}

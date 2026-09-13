@@ -27,6 +27,7 @@
     "@tiptap/pm": "^3.31.0",
     "@tiptap/starter-kit": "^3.31.0",
     "@tiptap/vue-3": "^3.31.0",
+    "archiver": "^7.0.1",
     "bcryptjs": "^3.0.3",
     "isomorphic-dompurify": "^3.19.0",
     "lucide-vue-next": "^1.0.0",
