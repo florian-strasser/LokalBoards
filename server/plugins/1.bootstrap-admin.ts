@@ -2,6 +2,7 @@ import type { RowDataPacket } from "mysql2";
 import bcrypt from "bcryptjs";
 import { v4 as uuidv4 } from "uuid";
 import { runMigrations, setupDatabase } from "../../app/lib/databaseSetup";
+import { startupStepDone } from "../utils/startup";
 
 // Seed the first administrator from the environment.
 //
@@ -46,7 +47,10 @@ export default defineNitroPlugin(async () => {
 
   // Not configured is the normal case for an instance set up through the
   // sign-up form; say nothing at all.
-  if (!email && !password) return;
+  if (!email && !password) {
+    startupStepDone("admin");
+    return;
+  }
 
   try {
     await runMigrations();
@@ -127,5 +131,10 @@ export default defineNitroPlugin(async () => {
     );
   } catch (error) {
     logger.error("Admin bootstrap failed", error);
+  } finally {
+    // Done either way: a failure is logged and the instance still serves, as
+    // it always has. /api/health waits for this so that "healthy" means the
+    // administrator it was told to create can sign in.
+    startupStepDone("admin");
   }
 });

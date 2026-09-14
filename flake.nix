@@ -46,6 +46,14 @@
         default = self.nixosModules.lokalboards;
       };
 
+      # The module, booted: a NixOS VM set up the way the guide describes and
+      # put through what someone following it would try, reboot included. See
+      # nix/test.nix. CI runs the x86_64-linux one; on a Mac the aarch64-darwin
+      # one drives an aarch64 guest through a Linux builder.
+      checks = forAllSystems (pkgs: {
+        nixos-module = pkgs.testers.runNixOSTest (import ./nix/test.nix { inherit self; });
+      });
+
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {
           packages = [ pkgs.nodejs_22 pkgs.mysql84 ];

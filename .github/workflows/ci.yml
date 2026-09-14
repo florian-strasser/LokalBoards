@@ -181,11 +181,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      # GitHub's Linux runners have KVM, but only root may open it. The NixOS
+      # test below boots a VM, and Nix builds as unprivileged users.
+      - name: Make KVM usable
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
       - name: Install Nix
         uses: cachix/install-nix-action@v31
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
+            system-features = nixos-test benchmark big-parallel kvm
 
       # The Nix package takes its dependencies straight from package-lock.json,
       # so there is no hash to fall out of step with it any more. What this
@@ -223,3 +233,10 @@ jobs:
               });
             in system.config.systemd.units."lokalboards.service".text
           '
+
+      # Evaluating is not booting. This boots it: a NixOS VM with the module,
+      # MySQL and nginx set up the way the guide describes, signed into, uploaded
+      # to and rebooted — see nix/test.nix. It is also the only place the module
+      # runs on x86_64.
+      - name: Boot the NixOS module
+        run: nix build .#checks.x86_64-linux.nixos-module --print-build-logs

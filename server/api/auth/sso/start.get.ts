@@ -1,3 +1,4 @@
+import { secureCookiesFor } from "../../../utils/secureCookies";
 import { sendRedirect, setCookie } from "h3";
 import { findProvider } from "../../../utils/ssoProviders";
 import {
@@ -47,9 +48,7 @@ export default defineEventHandler(async (event) => {
       sameSite: "lax" as const,
       path: "/",
       maxAge: 600,
-      secure: String(useRuntimeConfig(event).boardsUrl || "").startsWith(
-        "https://",
-      ),
+      secure: secureCookiesFor(event),
     };
     setCookie(event, "sso_state", state, cookie);
     setCookie(event, "sso_nonce", nonce, cookie);

@@ -28,9 +28,10 @@ in
       default = "127.0.0.1";
       description = ''
         Address to bind. Left on loopback by default: the app speaks plain HTTP
-        and sets its session cookie `secure` only when it believes it is behind
-        TLS, so it belongs behind a reverse proxy rather than on a public
-        interface.
+        and belongs behind a reverse proxy that terminates TLS, rather than on a
+        public interface. Its session cookie is marked `Secure` when
+        `NUXT_BOARDS_URL` is an https address or the proxy sends
+        `X-Forwarded-Proto: https`.
       '';
     };
 
@@ -57,8 +58,9 @@ in
           that authenticate over the unix socket while this application connects
           over TCP with a password. Create it once, with the same password the
           `environmentFile` carries — for example through
-          `services.mysql.initialScript`, which takes a file that is read on
-          first start:
+          `services.mysql.initialScript`, a SQL file MySQL runs when it starts
+          for the first time. It holds the password, so keep it outside the Nix
+          store and readable by the `mysql` user:
 
           ```sql
           CREATE USER 'lokalboards'@'localhost' IDENTIFIED BY 'the-password';

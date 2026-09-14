@@ -192,29 +192,88 @@ written into the Nix store instead, which is world-readable.
 One thing the module deliberately does not do is create the database *user*.
 NixOS creates database users that authenticate through the unix socket with no
 password, while this application connects over TCP with one, so an
-automatically-created user could never log in. Create it once with the same
-password `environmentFile` carries — `services.mysql.initialScript` takes a file
-that is read on first start:
+automatically-created user could never log in. Create it once, with the same
+password `environmentFile` carries. `services.mysql.initialScript` runs a SQL
+file when MySQL starts for the first time:
+
+```nix
+services.mysql.initialScript = "/run/secrets/lokalboards-init.sql";
+```
 
 ```sql
 CREATE USER 'lokalboards'@'localhost' IDENTIFIED BY 'the-password';
 GRANT ALL PRIVILEGES ON lokalboards.* TO 'lokalboards'@'localhost';
 ```
 
-The service listens on `127.0.0.1` by default. It speaks plain HTTP and marks
-its session cookie `secure` only when it believes it is behind TLS, so put a
-reverse proxy in front rather than moving it to a public interface.
+The file holds the password, so keep it out of the Nix store like the
+environment file, and readable by the `mysql` user — MySQL reads it, not root.
+It only runs while MySQL sets up its data directory; on a machine where MySQL
+has started before, run the two statements once with `sudo mysql` instead.
 
-### What has been tested, and what has not
+### Behind a reverse proxy
 
-The package is built and run on every release: it builds from the lockfile
-without network access, and the result has been started against a MySQL 8, seen
-to run its migrations and serve the sign-in page.
+The service listens on `127.0.0.1`. Put a reverse proxy that terminates TLS in
+front of it rather than moving it to a public interface. With nginx:
 
-**The NixOS module has not been run on a NixOS machine.** It evaluates — `nix
-flake check` passes and the generated systemd unit has been inspected — but
-evaluating is not running. If you deploy it, reports are very welcome on
-[the issue tracker](https://github.com/florian-strasser/LokalBoards/issues).
+```nix
+{
+  services.lokalboards.settings.NUXT_BOARDS_URL = "https://boards.example.com";
+
+  services.nginx = {
+    enable = true;
+    # Among other headers, tells the app that the browser used HTTPS.
+    recommendedProxySettings = true;
+    recommendedTlsSettings = true;
+    # Attachments can be up to 50 MB; nginx turns away any request over 1 MB
+    # unless told otherwise.
+    clientMaxBodySize = "50m";
+    virtualHosts."boards.example.com" = {
+      forceSSL = true;
+      enableACME = true;
+      locations."/" = {
+        proxyPass = "http://127.0.0.1:3000";
+        # Boards update live over a websocket.
+        proxyWebsockets = true;
+      };
+    };
+  };
+
+  security.acme = {
+    acceptTerms = true;
+    defaults.email = "you@example.com";
+  };
+
+  networking.firewall.allowedTCPPorts = [ 80 443 ];
+}
+```
+
+`NUXT_BOARDS_URL` is the address people reach the instance at: links in emails
+and single sign-on are built from it. When it starts with `https://`, or the
+proxy sends `X-Forwarded-Proto: https` as `recommendedProxySettings` does, the
+session cookie is marked `Secure`. Over plain HTTP it is not, so an instance on a
+trusted network works without TLS too.
+
+### What has been tested
+
+The package is built on every release: from the lockfile, without network
+access, and then started against a MySQL 8 to run its migrations and serve the
+sign-in page.
+
+The module is booted on every change too. The flake carries a NixOS test that
+sets up a machine the way this page describes, reached through nginx over plain
+HTTP, and puts it through what you would try yourself: MySQL comes up with the
+database created, the user from `initialScript` logs in over TCP, the
+migrations run, the first administrator from `NUXT_ADMIN_EMAIL` signs in with a
+cookie that fits the connection, websockets for the live updates get through the
+proxy, uploads land in the state directory, and all of it is still there after a
+reboot. CI runs it on `x86_64-linux`; on a NixOS or Nix machine of your own:
+
+```bash
+nix build github:florian-strasser/LokalBoards#checks.x86_64-linux.nixos-module
+```
+
+Not covered: certificates from ACME, and single sign-on. Reports are very
+welcome on [the issue tracker](https://github.com/florian-strasser/LokalBoards/issues).
 
 ## Building the image yourself
 

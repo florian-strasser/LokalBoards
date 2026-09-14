@@ -1,3 +1,4 @@
+import { secureCookiesFor } from "./secureCookies";
 import { setupDatabase } from "../../app/lib/databaseSetup";
 import { v4 as uuidv4 } from "uuid";
 import { setCookie, getCookie } from "h3";
@@ -63,17 +64,11 @@ export async function createSession(
       ],
     );
 
-    // Set session cookie
-    const isProduction =
-      process.env.NODE_ENV === "production" || process.env.NODE_ENV === "prod";
-    const isSecureContext =
-      process.env.NODE_ENV === "production" ||
-      process.env.SSL === "true" ||
-      event.headers["x-forwarded-proto"] === "https";
-
+    // Set session cookie. Secure when the instance is reached over HTTPS, which
+    // is not the same as running in production — see secureCookies.ts.
     setCookie(event, "session_token", sessionToken, {
       httpOnly: true,
-      secure: isSecureContext,
+      secure: secureCookiesFor(event),
       sameSite: "lax",
       maxAge: maxAgeSeconds,
       path: "/",

@@ -1,3 +1,19 @@
+## v0.38.2
+
+### Fixes
+
+- **Signing in over plain HTTP did nothing.** The session cookie was marked `Secure` whenever the server ran as a production build — which the Docker image and the Nix package always are — and a browser only keeps a Secure cookie over HTTPS. Sign-in answered as though it had worked, and the sign-in page came straight back with nothing to say why. Safari met it even on the Docker quick start's `http://localhost:3000`, which Chrome happens to treat as secure.
+
+  The flag now follows how the instance is actually reached: `NUXT_BOARDS_URL` starting with `https://`, a proxy sending `X-Forwarded-Proto: https`, a TLS connection, or `SSL=true`. The forwarded header was meant to count before as well, but was read in a way that always came back empty. Behind a TLS proxy nothing changes as long as one of those holds — and `NUXT_BOARDS_URL` should be the https address in any case, since links in emails and single sign-on are built from it.
+
+- **Creating a board through the API without an `image` failed with a server error**, although the API reference lists it as optional. Leaving it out now means no image.
+
+- **`/api/health` said healthy before the server was ready.** The server starts listening before its migrations have finished — its startup code assumed otherwise — so right after an update, or on a first start, the health check answered `200` while tables were still being created and before the first administrator from `NUXT_ADMIN_EMAIL` existed. Docker's healthcheck, a Compose dependency or a load balancer could send people in to a sign-in that failed. It now answers `503` with `{ "status": "starting" }` until both are done, and `{ "status": "error" }` if the migrations fail.
+
+### Improvements
+
+- **The NixOS module is booted on every change**, as asked for in [#13](https://github.com/florian-strasser/LokalBoards/issues/13). The flake has a NixOS test (`checks.<system>.nixos-module`) that sets up a machine the way the guide describes, behind nginx, and checks the database and its user, the migrations, the first administrator's sign-in and its cookie, live updates through the proxy, uploads, and that all of it survives a reboot. CI runs it on `x86_64-linux`. The fixes above came out of running it. The guide gained a reverse-proxy example with TLS, websockets and the upload size nginx refuses by default, and now says to keep the `initialScript` holding the database password out of the Nix store, readable by the `mysql` user.
+
 ## v0.38.1
 
 ### Improvements

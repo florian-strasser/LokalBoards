@@ -45,6 +45,9 @@ export default defineEventHandler(async (event) => {
       // ends up in a CSS custom property, so this is the boundary that keeps
       // the stylesheet safe rather than a formatting nicety.
       const boardColor = normalizeBoardColor(color);
+      // Optional in the API, so it may simply be missing — and MySQL takes a
+      // missing value as an error rather than as no image.
+      const boardImage = image ?? null;
 
       // Resolve the authenticated user.
       const auth = await resolveUserId(event);
@@ -97,7 +100,7 @@ export default defineEventHandler(async (event) => {
           // Update existing board
           const [result] = await db.execute(
             "UPDATE boards SET name = ?, style = ?, image = ?, color = ?, status = ? WHERE id = ? AND user = ?",
-            [name, style, image, boardColor, status, id, userId],
+            [name, style, boardImage, boardColor, status, id, userId],
           );
 
           if (result.affectedRows === 0) {
@@ -136,7 +139,7 @@ export default defineEventHandler(async (event) => {
         // Create new board
         const [result] = await db.execute(
           "INSERT INTO boards (user, name, style, image, color, status) VALUES (?, ?, ?, ?, ?, ?)",
-          [userId, name, style, image, boardColor, status],
+          [userId, name, style, boardImage, boardColor, status],
         );
 
         const [rows] = await db.execute("SELECT * FROM boards WHERE id = ?", [
