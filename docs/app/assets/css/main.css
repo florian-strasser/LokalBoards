@@ -731,22 +731,11 @@ html.menu-open {
 @media (prefers-reduced-motion: reduce) {
   .burger__bar,
   .menu-row,
-  /* Animating to `auto` is not a thing CSS can do; animating a grid track from
-   `0fr` to `1fr` is, and it needs no measuring. */
-.submenu {
-  display: grid;
-  grid-template-rows: 0fr;
-  transition: grid-template-rows 0.32s cubic-bezier(0.16, 1, 0.3, 1);
-}
-.submenu--open {
-  grid-template-rows: 1fr;
-}
-.submenu > div {
-  overflow: hidden;
-}
-
-.sheet-enter-active,
-  .sheet-leave-active {
+  .submenu,
+  .sheet-enter-active,
+  .sheet-leave-active,
+  .menu-enter-active,
+  .menu-leave-active {
     transition: none;
   }
 }

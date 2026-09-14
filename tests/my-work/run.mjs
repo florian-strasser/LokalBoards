@@ -79,6 +79,7 @@ try {
   };
   const me = await account("Florian", "me@example.test");
   const colleague = await account("Anna", "anna@example.test");
+  const idle = await account("Idle", "idle@example.test");
 
   const DAY = 86400000;
   const inDays = (days, hour = 10) => {
@@ -111,6 +112,13 @@ try {
   const oldArea = await area(website, "Old", 2, new Date());
   await card(oldArea, "In an archived area", { assignee: me.id });
 
+  // Idle has cards to their name on a board of their own, and none of it is
+  // work: one is done and the other archived. My work should not be offered.
+  const idleBoard = await board("Idle's board", idle);
+  const idleArea = await area(idleBoard, "List");
+  await card(idleArea, "Idle's finished card", { assignee: idle.id, status: 1, dueDate: inDays(-1) });
+  await card(idleArea, "Idle's archived card", { assignee: idle.id, archivedAt: new Date(), sort: 1 });
+
   // Mine alone; Anna is not on it, even though a card there names her.
   const personal = await board("Personal", me);
   const personalArea = await area(personal, "List");
@@ -139,6 +147,9 @@ try {
     hers.length === 1 && hers[0].id === anna, hers.map((x) => x.name).join(" | "));
   const signedOut = await fetch(`${BASE}/api/data/my-work`);
   check("signed out, there is nothing", signedOut.status === 403, `status ${signedOut.status}`);
+  const count = async (who) => (await (await fetch(`${BASE}/api/data/my-work?count=1`, { headers: { cookie: who.cookie } })).json()).count;
+  check("the count is exactly the cards My work lists", (await count(me)) === mine.length && (await count(colleague)) === hers.length, `${await count(me)} / ${mine.length}`);
+  check("and nothing for somebody whose assigned cards are all done or archived", (await count(idle)) === 0, String(await count(idle)));
 
   // ------------------------------------------------------------ browser ----
   browser = await chromium.launch();
@@ -190,6 +201,35 @@ try {
   }));
   check("and the switch under it goes to Boards", phoneAfter.heading === "Boards" && phoneAfter.groups === 0, JSON.stringify(phoneAfter));
   if (SHOTS) await page.screenshot({ path: path.join(SHOTS, "boards-mobile.png") });
+
+  // Somebody with nothing open on them is not offered an empty view.
+  const idleContext = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  await idleContext.addCookies([{ name: "session_token", value: idle.cookie.split("=").slice(1).join("="), domain: "127.0.0.1", path: "/" }]);
+  const idlePage = await idleContext.newPage();
+  await idlePage.goto(`${BASE}/dashboard/`, { waitUntil: "networkidle" });
+  await idlePage.waitForTimeout(600);
+  const idleDesktop = await idlePage.evaluate(() => ({
+    heading: document.querySelector("h1")?.textContent.trim(),
+    links: document.querySelectorAll("a[href*='view=mine']").length,
+    switches: document.querySelectorAll("input[name='dashboardView']").length,
+  }));
+  check("with no open card assigned, the heading is just Boards", idleDesktop.heading === "Boards" && idleDesktop.links === 0 && idleDesktop.switches === 0, JSON.stringify(idleDesktop));
+  await idlePage.setViewportSize({ width: 375, height: 812 });
+  await idlePage.reload({ waitUntil: "networkidle" });
+  await idlePage.waitForTimeout(600);
+  const idlePhone = await idlePage.evaluate(() => ({
+    heading: document.querySelector("h1")?.textContent.trim(),
+    switchVisible: [...document.querySelectorAll("input[name='dashboardView']")].some((input) => input.closest("div")?.offsetParent !== null),
+  }));
+  check("and on a phone there is no switch under it", idlePhone.heading === "Boards" && !idlePhone.switchVisible, JSON.stringify(idlePhone));
+  if (SHOTS) await idlePage.screenshot({ path: path.join(SHOTS, "idle-mobile.png") });
+  await idlePage.setViewportSize({ width: 1280, height: 900 });
+  await idlePage.goto(`${BASE}/dashboard/?view=mine`, { waitUntil: "networkidle" });
+  await idlePage.waitForTimeout(600);
+  check("a link to My work lands on the boards instead of an empty view",
+    new URL(idlePage.url()).pathname === "/dashboard/" && !new URL(idlePage.url()).searchParams.get("view") && (await idlePage.locator("[data-work-group]").count()) === 0 && !(await idlePage.getByText("Nothing open is assigned to you").count()),
+    idlePage.url());
+  await idleContext.close();
   await page.setViewportSize({ width: 1280, height: 900 });
 
   // -------------------------------------------------- the filter in a link --

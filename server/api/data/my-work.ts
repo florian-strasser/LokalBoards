@@ -1,4 +1,4 @@
-import { defineEventHandler } from "h3";
+import { defineEventHandler, getQuery } from "h3";
 import { setupDatabase } from "../../../app/lib/databaseSetup";
 import { checklistProgress } from "../../../app/utils/checklistProgress";
 
@@ -11,8 +11,25 @@ import { checklistProgress } from "../../../app/utils/checklistProgress";
 //
 // The grouping into overdue, this week and later happens in the browser, which
 // knows what "today" is for the person looking.
+//
+// `?count=1` answers only how many there are. The dashboard asks that on every
+// visit to decide whether My work is offered at all, and it should not have to
+// read five hundred cards to find out there is one.
 
 const LIMIT = 500;
+
+// Which cards count as your work — shared by the list and the count, so the
+// switch can never offer a view that then turns out empty.
+const OPEN_WORK = `
+         FROM \`cards\` c
+         JOIN \`areas\` a ON a.\`id\` = c.\`area\`
+         JOIN \`boards\` b ON b.\`id\` = a.\`board\`
+        WHERE c.\`assignee\` = ?
+          AND (c.\`status\` = 0 OR c.\`status\` IS NULL)
+          AND c.\`archivedAt\` IS NULL
+          AND a.\`archivedAt\` IS NULL
+          AND b.\`archivedAt\` IS NULL
+          AND (b.\`user\` = ? OR b.\`id\` IN (SELECT \`board\` FROM \`invitations\` WHERE \`user\` = ?))`;
 
 export default defineEventHandler(async (event) => {
   if (event.req.method !== "GET") {
@@ -29,19 +46,19 @@ export default defineEventHandler(async (event) => {
   const db = setupDatabase();
 
   try {
+    if (getQuery(event).count) {
+      const [counted]: any = await db.execute(
+        `SELECT COUNT(*) AS count ${OPEN_WORK}`,
+        [userId, userId, userId],
+      );
+      return { count: Number(counted[0]?.count ?? 0) };
+    }
+
     const [rows]: any = await db.execute(
       `SELECT c.\`id\`, c.\`name\`, c.\`content\`, c.\`dueDate\`,
               a.\`id\` AS areaId, a.\`name\` AS areaName,
               b.\`id\` AS boardId, b.\`name\` AS boardName
-         FROM \`cards\` c
-         JOIN \`areas\` a ON a.\`id\` = c.\`area\`
-         JOIN \`boards\` b ON b.\`id\` = a.\`board\`
-        WHERE c.\`assignee\` = ?
-          AND (c.\`status\` = 0 OR c.\`status\` IS NULL)
-          AND c.\`archivedAt\` IS NULL
-          AND a.\`archivedAt\` IS NULL
-          AND b.\`archivedAt\` IS NULL
-          AND (b.\`user\` = ? OR b.\`id\` IN (SELECT \`board\` FROM \`invitations\` WHERE \`user\` = ?))
+       ${OPEN_WORK}
         ORDER BY c.\`dueDate\` IS NULL, c.\`dueDate\`, b.\`name\`, a.\`sort\`, c.\`sort\`, c.\`id\`
         LIMIT ${LIMIT}`,
       [userId, userId, userId],

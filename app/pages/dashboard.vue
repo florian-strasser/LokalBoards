@@ -17,6 +17,10 @@
                      at heading size — in Czech, German, French, Italian and
                      Portuguese not even at 640 pixels — so a narrow screen names
                      the view it is showing, and the switch sits under it. -->
+                <!-- Only for somebody with work to show. Without an open card
+                     on them the heading is Boards and nothing else, as it was
+                     before My work existed. -->
+                <template v-if="hasMyWork">
                 <span class="md:hidden">{{
                     myWork ? $t("myWork") : $t("boards")
                 }}</span>
@@ -36,6 +40,8 @@
                         >{{ $t("myWork") }}</NuxtLink
                     >
                 </span>
+                </template>
+                <template v-else>{{ $t("boards") }}</template>
                 <template #actions>
                     <ActionMenu :tooltip="$t('moreOptions')">
                         <button
@@ -57,7 +63,7 @@
                     </ActionMenu>
                 </template>
             </SectionHeader>
-            <div class="-mt-4 mb-8 md:hidden">
+            <div v-if="hasMyWork" class="-mt-4 mb-8 md:hidden">
                 <SegmentedControl
                     :values="[
                         { value: 'boards', label: $t('boards') },
@@ -203,7 +209,25 @@ const createBoard = ref(false);
 const archiveModal = ref(false);
 
 const route = useRoute();
-const myWork = computed(() => route.query.view === "mine");
+
+// Whether My work has anything in it: an open card assigned to you, not
+// archived, on a board you are still on — counted by the same query the view
+// lists from. Without one, neither the switch nor the view is offered; a
+// heading that leads to "nothing is assigned to you" only raises the question
+// of what it was for. Asked on every visit, so the switch is there the first
+// time something is assigned.
+const { data: workCount } = await useFetch("/api/data/my-work", {
+    query: { count: 1 },
+});
+const hasMyWork = computed(() => Number(workCount.value?.count ?? 0) > 0);
+const myWork = computed(
+    () => hasMyWork.value && route.query.view === "mine",
+);
+// A bookmark or a link to My work, followed with nothing in it, lands on the
+// boards rather than on an empty view.
+if (route.query.view === "mine" && !hasMyWork.value) {
+    await navigateTo("/dashboard/", { replace: true });
+}
 // The narrow layout's switch. Setting it goes to the view's address, so Back
 // and a bookmark behave the same whichever of the two was used.
 const view = computed({

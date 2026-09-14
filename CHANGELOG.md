@@ -1,3 +1,13 @@
+## v0.38.1
+
+### Improvements
+
+- **My work is only offered when there is work in it.** Everybody saw the **Boards · My work** switch on the dashboard, including people with nothing assigned, for whom it led to an empty page saying so. The switch now appears once an open card is assigned to you — not done, not archived, on a board you are still on, which is exactly what My work lists — and until then the dashboard's heading is **Boards**, as it was. A bookmark to `/dashboard/?view=mine` with nothing in it opens the boards. The API's `/api/data/my-work` takes `?count=1` to answer just how many there are.
+
+### Fixes
+
+- **The website's phone menu broke for anyone who asks their system for less motion.** The rule meant to switch its animations off had another block of rules pasted into the middle of it, so with reduced motion on, the menu's rows were laid out as collapsed grids, its fade still ran, and the submenu kept its transition. It now does only what it says: the menu appears and closes without moving.
+
 ## v0.38.0
 
 ### New Features
