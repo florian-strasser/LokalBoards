@@ -851,7 +851,11 @@ const toggleChecklistItem = (index) => {
 };
 
 const handleCommentCreated = (newComment) => {
-    comments.value.unshift(newComment);
+    // The dialog's own copy is what the comment section is rebuilt from when it
+    // remounts, so a comment that is already here must not be added again.
+    const merged = withComment(comments.value, newComment);
+    if (merged === comments.value) return;
+    comments.value = merged;
     emits("comment-count-updated", {
         cardId: props.cardID,
         commentCount: comments.value.length,
@@ -869,7 +873,7 @@ const handleCommentCreated = (newComment) => {
 // pass it up, so the board's cached card and the tile's badge agree with what
 // is on screen — and so reopening the card doesn't fall back to the old copy.
 const handleCommentsRefreshed = (fresh) => {
-    comments.value = fresh;
+    comments.value = uniqueComments(fresh);
     emits("comment-count-updated", {
         cardId: props.cardID,
         commentCount: fresh.length,

@@ -32,24 +32,31 @@ export default defineNitroPlugin((nitroApp: NitroApp) => {
   // client claims to be. Anonymous connections are still allowed (the handshake
   // is shared with clients that only listen), but they are given no identity and
   // pass no access check, so they can neither read nor inject anything.
-  const sessionUser = async (socket: any) => {
-    if (socket.data.userLoaded) return socket.data.user;
-    socket.data.userLoaded = true;
-    socket.data.user = null;
-    try {
-      const cookie = socket.handshake.headers?.cookie || "";
-      const token = cookie
-        .split(";")
-        .map((c: string) => c.trim())
-        .find((c: string) => c.startsWith("session_token="))
-        ?.slice("session_token=".length);
-      if (!token) return null;
-      const result = await resolveSessionToken(decodeURIComponent(token));
-      if (result.status === "ok") socket.data.user = result.user;
-    } catch (err) {
-      logger.error("Socket session resolution failed:", err);
-    }
-    return socket.data.user;
+  //
+  // The lookup itself is remembered, not a flag saying it has started: a client
+  // that joins its board and its card in the same tick calls this twice at once,
+  // and a flag set before the `await` made the second call read the session as
+  // "resolved, nobody". Its access check then failed and the card was never
+  // joined — so a card opened straight after the page loaded received no live
+  // comments or presence until it was closed and opened again.
+  const sessionUser = (socket: any): Promise<any> => {
+    socket.data.userPromise ??= (async () => {
+      try {
+        const cookie = socket.handshake.headers?.cookie || "";
+        const token = cookie
+          .split(";")
+          .map((c: string) => c.trim())
+          .find((c: string) => c.startsWith("session_token="))
+          ?.slice("session_token=".length);
+        if (!token) return null;
+        const result = await resolveSessionToken(decodeURIComponent(token));
+        return result.status === "ok" ? result.user : null;
+      } catch (err) {
+        logger.error("Socket session resolution failed:", err);
+        return null;
+      }
+    })();
+    return socket.data.userPromise;
   };
 
   // Board access for a socket, memoised briefly: these checks sit in front of

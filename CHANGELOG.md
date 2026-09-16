@@ -1,3 +1,11 @@
+## v0.38.3
+
+### Fixes
+
+- **A comment you had just written could appear twice.** For a moment the same comment was in the list twice — your own copy and one that arrived alongside it — and a reload put it right. The list now takes a comment only if it is not already there, whichever way it arrives, and what is drawn is de-duplicated by id as well, so the same comment cannot be shown twice even briefly. The dialog's own copy of the thread, which the comment section is rebuilt from when it reopens, is held to the same rule.
+
+- **A card opened right after the page loaded received nothing live.** No comments from other people, no presence — until the card was closed and opened again, or the page reloaded. The browser asks to join the board's room and the card's room in the same moment, and both ask the server who is on the socket. The second question was answered "nobody" because the answer to the first had not arrived yet, so the card was quietly never joined. Both now wait for the same answer.
+
 ## v0.38.2
 
 ### Fixes

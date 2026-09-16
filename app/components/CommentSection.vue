@@ -286,7 +286,7 @@ const refreshComments = async () => {
                     c.content === (comments.value[i] as any)?.content,
             );
         if (unchanged) return;
-        comments.value = fresh;
+        comments.value = uniqueComments(fresh);
         // Hand it up so the modal and the board replace their prefetched copy:
         // otherwise the badge and the next open would disagree again.
         emits("comments-refreshed", fresh);
@@ -343,7 +343,9 @@ watch(
 // Newest first, matching how comments are already listed.
 const timeline = computed(() => {
     const items = [
-        ...comments.value.map((c: any) => ({
+        // Deduplicated at the last moment as well: whatever put a comment in
+        // the list, it is drawn once.
+        ...uniqueComments(comments.value).map((c: any) => ({
             kind: "comment" as const,
             key: `c${c.id}`,
             date: new Date(c.date ?? c.createdAt ?? 0).getTime(),
@@ -430,7 +432,7 @@ const formatActivityDate = (value: string) =>
     });
 
 // Local state for comments to handle additions and deletions
-const comments = ref<Comment[]>([...props.initialComments]);
+const comments = ref<Comment[]>(uniqueComments([...props.initialComments]));
 
 // State for comment deletion confirmation
 const commentToDelete = ref<number | null>(null);
@@ -528,9 +530,11 @@ interface Comment {
 
 // Handle the creation of a new comment
 const handleCommentCreated = (newComment: Comment) => {
-    // Check if comment already exists in the array
-    if (!comments.value.some((c) => c.id === newComment.id)) {
-        comments.value.unshift(newComment);
+    // The same comment can arrive twice — the answer to this browser's own POST
+    // and the card's socket room — so it is only ever added if it is not here.
+    const merged = withComment(comments.value, newComment);
+    if (merged !== comments.value) {
+        comments.value = merged;
         emits("comment-created", newComment);
         emits("comment-count-updated", {
             cardId: props.cardID,
