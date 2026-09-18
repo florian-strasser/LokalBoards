@@ -174,12 +174,15 @@ const positionPanel = () => {
 };
 
 // Close when clicking anywhere outside the bell and the panel — the panel now
-// floats over the page, so it can't be left hanging there.
+// floats over the page, so it can't be left hanging there. Outside from the
+// start of the press to its end: selecting a notification's text and letting
+// go past the panel is reported as a click out there too.
+const press = createPressTracker();
+const outside = (target: EventTarget | null) =>
+    !bellWrapper.value?.contains(target as Node) &&
+    !panel.value?.contains(target as Node);
 const handleOutsideClick = (event: MouseEvent) => {
-    const target = event.target as Node;
-    if (bellWrapper.value?.contains(target) || panel.value?.contains(target))
-        return;
-    showNotifications.value = false;
+    if (press.stayed(event, outside)) showNotifications.value = false;
 };
 
 watch(showNotifications, async (open) => {
@@ -191,10 +194,14 @@ watch(showNotifications, async (open) => {
             capture: true,
         });
         window.addEventListener("resize", positionPanel, { passive: true });
+        document.addEventListener("pointerdown", press.down, true);
+        document.addEventListener("pointerup", press.up, true);
         document.addEventListener("click", handleOutsideClick);
     } else {
         window.removeEventListener("scroll", positionPanel, true);
         window.removeEventListener("resize", positionPanel);
+        document.removeEventListener("pointerdown", press.down, true);
+        document.removeEventListener("pointerup", press.up, true);
         document.removeEventListener("click", handleOutsideClick);
     }
 });
@@ -202,6 +209,8 @@ watch(showNotifications, async (open) => {
 onBeforeUnmount(() => {
     window.removeEventListener("scroll", positionPanel, true);
     window.removeEventListener("resize", positionPanel);
+    document.removeEventListener("pointerdown", press.down, true);
+    document.removeEventListener("pointerup", press.up, true);
     document.removeEventListener("click", handleOutsideClick);
 });
 

@@ -68,8 +68,8 @@ const onUpdateAreas = ({ areas, boardId }) => {
     if (isThisBoard(boardId)) emits("areas-updated", areas);
 };
 
-const onAddCard = ({ card, boardId }) => {
-    if (isThisBoard(boardId)) emits("card-created", card);
+const onAddCard = ({ card, boardId, after }) => {
+    if (isThisBoard(boardId)) emits("card-created", card, after);
 };
 
 const onUpdateCard = ({ card, boardId }) => {

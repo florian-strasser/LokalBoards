@@ -47,6 +47,7 @@
     "uuid": "^14.0.1"
   },
   "overrides": {
+    "devalue": "^5.9.2",
     "esbuild": "0.28.1",
     "ws": "8.21.0",
     "@hono/node-server": "^2.0.5",

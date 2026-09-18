@@ -1,6 +1,7 @@
 import { defineEventHandler, readBody } from "h3";
 import { setupDatabase } from "../../../app/lib/databaseSetup";
 import { getServerSocket } from "../../utils/socket";
+import { putCard } from "../../utils/cardPositions";
 
 export default defineEventHandler(async (event) => {
   const method = event.req.method;
@@ -68,30 +69,19 @@ export default defineEventHandler(async (event) => {
           // one place too few and the card lands one short of where it was
           // dropped — visibly correct until the page was reloaded. Moving up
           // happened to come out right, which is why it went unnoticed.
-          const [ordered]: any = await db.execute(
-            "SELECT id FROM cards WHERE area = ? ORDER BY sort ASC, id ASC",
-            [areaId],
+          //
+          // The index counts the cards the board shows, so archived ones are
+          // stepped over rather than counted (see `cardPositions`).
+          const [inArea]: any = await db.execute(
+            "SELECT id FROM cards WHERE id = ? AND area = ?",
+            [cardId, areaId],
           );
-
-          const ids = ordered.map((row: any) => Number(row.id));
-          if (!ids.includes(Number(cardId))) {
+          if (!inArea.length) {
             event.res.statusCode = 404;
             return { error: "Resource not found" };
           }
 
-          const without = ids.filter((id: number) => id !== Number(cardId));
-          const target = Math.max(
-            0,
-            Math.min(Number(newIndex), without.length),
-          );
-          without.splice(target, 0, Number(cardId));
-
-          for (let i = 0; i < without.length; i++) {
-            await db.execute("UPDATE cards SET sort = ? WHERE id = ?", [
-              i,
-              without[i],
-            ]);
-          }
+          await putCard(db, Number(areaId), Number(cardId), Number(newIndex));
 
           // Emit socket event for card reordering (API calls only)
           if (auth.viaApiKey) {

@@ -3,6 +3,7 @@ import { setupDatabase } from "../../../app/lib/databaseSetup";
 import { pruneUnusedLabels } from "../../utils/labelCleanup";
 import { dispatchWebhooks } from "../../utils/webhooks";
 import { getServerSocket } from "../../utils/socket";
+import { nextCardSort } from "../../utils/cardPositions";
 
 // Function to handle file uploads
 async function handleFileUpload(db, cardID, file) {
@@ -143,16 +144,14 @@ export default defineEventHandler(async (event) => {
         return { error: writeDecision.error };
       }
       {
-        const [crows] = await db.execute("SELECT * FROM cards WHERE area = ?", [
-          areaId,
-        ]);
-
-        const cardCount = crows ? crows.length + 1 : 0;
+        // At the bottom of the column: after the highest number in it, not
+        // after however many cards it has (see `cardPositions`).
+        const sort = await nextCardSort(db, Number(areaId));
 
         // Create new card
         const [result] = await db.execute(
           "INSERT INTO cards (area, name, content, status, sort) VALUES (?, ?, ?, ?, ?)",
-          [areaId, name, content || "", status ? 1 : 0, cardCount],
+          [areaId, name, content || "", status ? 1 : 0, sort],
         );
 
         const [rows] = await db.execute("SELECT * FROM cards WHERE id = ?", [

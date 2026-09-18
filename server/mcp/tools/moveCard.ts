@@ -2,6 +2,7 @@ import { z } from "zod";
 import { defineMcpTool } from "@nuxtjs/mcp-toolkit/server";
 import { setupDatabase } from "../../../app/lib/databaseSetup";
 import { getServerSocket } from "../../utils/socket";
+import { putCard, renumberColumn } from "../../utils/cardPositions";
 import {
   requireUserId,
   requireWriteAccess,
@@ -78,39 +79,11 @@ export default defineMcpTool({
       );
     }
 
-    let index = position ?? newIndex;
-    if (index == null) {
-      const [[c]]: any = await db.query(
-        "SELECT COUNT(*) AS n FROM cards WHERE area = ?",
-        [toAreaId],
-      );
-      index = c.n; // append to end
-    }
-
-    const renumber = async (areaId: number) => {
-      const [cards]: any = await db.execute(
-        "SELECT id FROM cards WHERE area = ? ORDER BY sort ASC",
-        [areaId],
-      );
-      for (let i = 0; i < cards.length; i++) {
-        await db.execute("UPDATE cards SET sort = ? WHERE id = ?", [
-          i,
-          cards[i].id,
-        ]);
-      }
-    };
-
-    await db.execute(
-      "UPDATE cards SET sort = sort + 1 WHERE sort >= ? AND area = ?",
-      [index, toAreaId],
-    );
-    await db.execute("UPDATE cards SET area = ?, sort = ? WHERE id = ?", [
-      toAreaId,
-      index,
-      cardId,
-    ]);
-    await renumber(toAreaId);
-    if (sourceAreaId !== toAreaId) await renumber(sourceAreaId);
+    // Counted among the cards `listCards` returns — archived ones are stepped
+    // over — and the end of the column when no position is given (see
+    // `cardPositions`).
+    const index = await putCard(db, toAreaId, cardId, position ?? newIndex ?? null);
+    if (sourceAreaId !== toAreaId) await renumberColumn(db, sourceAreaId);
 
     // Notify collaborators (destination board) except the mover.
     if (sourceAreaId !== toAreaId) {

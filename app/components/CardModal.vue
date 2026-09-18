@@ -1219,6 +1219,7 @@ const duplicateCard = async () => {
         socket.emit("cardCreated", {
             boardId: props.boardID,
             card: data.card,
+            after: props.card?.id,
         });
         await nuxtApp.callHook("app:toast", {
             message: $t("cardDuplicated"),

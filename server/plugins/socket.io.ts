@@ -369,7 +369,9 @@ export default defineNitroPlugin((nitroApp: NitroApp) => {
     });
 
     // CardCreated
-    socket.on("cardCreated", async ({ boardId, card }) => {
+    // `after` is set for a copy: the card it goes directly under. A new card
+    // has none and goes to the bottom.
+    socket.on("cardCreated", async ({ boardId, card, after }) => {
       if (!(await canAccessBoard(socket, boardId))) return;
       logger.debug(
         `Karte ${card.id} wurde auf Board ${boardId} erstellt (user-${socket.id})`,
@@ -377,6 +379,7 @@ export default defineNitroPlugin((nitroApp: NitroApp) => {
       io.except(`user-${socket.id}`).to(`board-${boardId}`).emit("addCard", {
         card,
         boardId,
+        after: Number(after) > 0 ? Number(after) : undefined,
       });
     });
 

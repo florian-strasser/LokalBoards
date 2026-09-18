@@ -6,14 +6,19 @@
          dynamic viewport is what is actually visible. The page behind is
          scroll-locked while a dialog is open, so the bars cannot slide away
          underneath it and change that height mid-read. -->
+    <!-- The space around the card closes it, but only when the whole press
+         happened there: selecting text inside the card and letting go beside
+         it is reported as a click on that space too (see `pressTracker`). -->
     <div
         :class="{ 'transform translate-x-full': !visible }"
         class="fixed top-0 left-0 w-full h-dvh z-40 flex flex-col justify-center overflow-hidden"
+        @pointerdown="press.down"
+        @pointerup="press.up"
     >
         <motion.div
             class="modal-backdrop absolute top-0 left-0 w-full h-full"
             :style="{ opacity: backdropOpacity }"
-            @click="closeModal"
+            @click="closeFromOutside"
         />
         <!-- The whole card scrolls (not an inner region). The enter/exit
              transform sits on THIS element, not on the card inside it: this is
@@ -43,7 +48,7 @@
         <motion.div
             class="relative w-full max-h-full py-8 overflow-y-auto overflow-x-hidden sm:pl-8 sm:pr-[calc(2rem+var(--scrollbar-gap,0px))]"
             :style="{ y, opacity: cardOpacity }"
-            @click.self="closeModal"
+            @click="closeFromOutside"
         >
             <div class="relative w-full sm:max-w-lg mx-auto">
                 <div
@@ -171,6 +176,15 @@ const handleEscKey = (event) => {
 
 const closeModal = () => {
     open.value = false;
+};
+
+// Asked of the element the handler sits on, not merely "somewhere outside the
+// card": a dialog opened inside this one's card has a backdrop of its own, and
+// a click there bubbles up through this one's surfaces as well.
+const press = createPressTracker();
+const closeFromOutside = (event) => {
+    const surface = event.currentTarget;
+    if (press.stayed(event, (target) => target === surface)) closeModal();
 };
 
 onMounted(() => {

@@ -1,3 +1,16 @@
+## v0.38.4
+
+### Fixes
+
+- **Selecting text no longer closes the card.** Select text in a card's editor, carry the selection out over the dimmed page, let go — and the card closed in the middle of the edit. The browser reports that release as a click on the space around the card, which is what closes it. Now only a click that starts and ends out there closes the card; a drag that began inside leaves it open, with the text still selected. The search results and the notifications panel, which close on a click outside them, had the same problem and are fixed the same way. A plain click beside any of them still closes it.
+- **New cards appeared in the middle of a column instead of at the bottom.** A new card's position was "how many cards the column has, plus one". That is only the bottom while positions have no gaps, and they do get gaps: every card deleted for good, by hand or by the archive's retention clean-up, takes its position with it. After that, the new card shared a position with a card further up and was drawn above it — immediately on screen, and after a reload too. A new card now goes after the highest position in the column. The board places it at the bottom itself rather than comparing positions, because the positions it holds go stale as soon as a card is dragged, and a copy of a card goes directly under the original on colleagues' screens as well as your own. Cards that already share a position are now always shown in the same order: the older one first. The same fix applies to cards an assistant creates through MCP.
+- **Moved cards could land a place too high.** The board says where a card was dropped by counting the cards it shows. The server used that count as a position number, which archived cards (still in the column, just not shown) and gaps both throw off, so with either above the drop point the card ended up higher than where it was let go. It showed after a reload or on a colleague's screen. The server now counts the way the board does, for dragging within a column, moving to another one and moving through MCP.
+
+### Security
+
+- **Moving a card checked the columns, not the card.** Someone who could edit a board could move any card into it by its number, including a card from a board they had no access to. The move now requires the card to actually be in the column it is being moved from. Moves through MCP already checked this.
+- **`devalue` is pinned to 5.9.2.** Nuxt uses it to pass the server's data to the browser, and versions below 5.9.2 could be made to spend a lot of time on a specially-shaped payload — a way to tie an instance up (CVE severity 5.3, denial of service only; nothing is read or changed). It arrived as a dependency of Nuxt itself and of the translations, so both the app and the documentation site carried it. Neither needed a new Nuxt: an override lifts it in both.
+
 ## v0.38.3
 
 ### Fixes

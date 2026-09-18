@@ -1112,7 +1112,7 @@ const onBoardSaved = async (board) => {
     await nuxtApp.callHook("app:toast", { message: $t("boardSaved") });
 };
 
-const handleCardCreated = (card) => {
+const handleCardCreated = (card, after = null) => {
     if (!cards.value[card.area]) {
         cards.value[card.area] = [];
     }
@@ -1133,20 +1133,17 @@ const handleCardCreated = (card) => {
         };
         return;
     }
-    // Where the server put it. A new card's `sort` is larger than anything in
-    // the list, so it still lands at the end; a duplicate's sits between the
-    // card it was copied from and the one that used to follow it. The `>=`
-    // matters: the cards below the original have been shifted down by one on
-    // the server, and this list still holds their old numbers, so the card the
-    // copy has to go in front of is carrying exactly the copy's own `sort`.
-    const sort = Number(card.sort);
-    const follows = Number.isFinite(sort)
-        ? cards.value[card.area].findIndex(
-              (existing) => Number(existing.sort) >= sort,
-          )
+    // Where the server put it: a new card at the bottom, a copy directly under
+    // the card it was made from, which the signal names. Not worked out from
+    // the cards' `sort` numbers — this list keeps the numbers it was loaded
+    // with, and the server renumbers a column whenever a card in it moves, so
+    // comparing the two put new cards in the middle of the column.
+    const list = cards.value[card.area];
+    const index = after
+        ? list.findIndex((existing) => Number(existing.id) === Number(after))
         : -1;
-    if (follows === -1) cards.value[card.area].push(card);
-    else cards.value[card.area].splice(follows, 0, card);
+    if (index === -1) list.push(card);
+    else list.splice(index + 1, 0, card);
 };
 
 // A card created locally (via the new-card form) should open directly in edit

@@ -653,14 +653,15 @@ watch(term, (value) => {
 // Dismissing on a click outside is the inline field's job: it hangs over the
 // page and has to get out of the way. In the dialog the backdrop already does
 // that, and this would close the results on any click inside the card.
+//
+// Outside from the start of the press to its end, that is: selecting the term
+// in the field and letting go below it is reported as a click out there too.
+const press = createPressTracker();
+const outside = (target: EventTarget | null) =>
+    !(root.value as HTMLElement | null)?.contains(target as Node) &&
+    !(panel.value as HTMLElement | null)?.contains(target as Node);
 const handleOutsideClick = (event: MouseEvent) => {
-    const target = event.target as Node;
-    if (
-        (root.value as HTMLElement | null)?.contains(target) ||
-        (panel.value as HTMLElement | null)?.contains(target)
-    )
-        return;
-    close();
+    if (press.stayed(event, outside)) close();
 };
 
 watch(showPanel, async (open) => {
@@ -673,10 +674,14 @@ watch(showPanel, async (open) => {
             capture: true,
         });
         window.addEventListener("resize", positionPanel, { passive: true });
+        document.addEventListener("pointerdown", press.down, true);
+        document.addEventListener("pointerup", press.up, true);
         document.addEventListener("click", handleOutsideClick);
     } else {
         window.removeEventListener("scroll", positionPanel, true);
         window.removeEventListener("resize", positionPanel);
+        document.removeEventListener("pointerdown", press.down, true);
+        document.removeEventListener("pointerup", press.up, true);
         document.removeEventListener("click", handleOutsideClick);
     }
 });
@@ -719,6 +724,8 @@ onBeforeUnmount(() => {
     clearTimeout(debounce);
     window.removeEventListener("scroll", positionPanel, true);
     window.removeEventListener("resize", positionPanel);
+    document.removeEventListener("pointerdown", press.down, true);
+    document.removeEventListener("pointerup", press.up, true);
     document.removeEventListener("click", handleOutsideClick);
 });
 </script>

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { defineMcpTool } from "@nuxtjs/mcp-toolkit/server";
 import { setupDatabase } from "../../../app/lib/databaseSetup";
 import { getServerSocket } from "../../utils/socket";
+import { nextCardSort } from "../../utils/cardPositions";
 import { dispatchWebhooks } from "../../utils/webhooks";
 import {
   requireUserId,
@@ -107,11 +108,9 @@ export default defineMcpTool({
       }
     }
 
-    const [countRows]: any = await db.execute(
-      "SELECT COUNT(*) AS n FROM cards WHERE area = ?",
-      [id],
-    );
-    const sort = (countRows[0]?.n ?? 0) + 1;
+    // After the highest number in the column, not after however many cards
+    // it has (see `cardPositions`).
+    const sort = await nextCardSort(db, id);
 
     let insertId: number;
     try {

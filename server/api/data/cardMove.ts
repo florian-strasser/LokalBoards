@@ -1,6 +1,7 @@
 import { defineEventHandler, readBody } from "h3";
 import { setupDatabase } from "../../../app/lib/databaseSetup";
 import { getServerSocket } from "../../utils/socket";
+import { putCard, renumberColumn } from "../../utils/cardPositions";
 
 export default defineEventHandler(async (event) => {
   const method = event.req.method;
@@ -15,21 +16,6 @@ export default defineEventHandler(async (event) => {
 
   try {
     const db = setupDatabase();
-
-    const renumberSortValues = async (areaId: number) => {
-      // Get all cards in the area ordered by their current sort value
-      const [cards] = (await db.execute(
-        "SELECT id FROM cards WHERE area = ? ORDER BY sort ASC",
-        [areaId],
-      )) as any[];
-      // Update each card with sequential sort values
-      for (let i = 0; i < (cards as any[]).length; i++) {
-        await db.execute("UPDATE cards SET sort = ? WHERE id = ?", [
-          i,
-          (cards as any[])[i].id,
-        ]);
-      }
-    };
 
     if (method === "POST") {
       const { cardId, fromAreaId, toAreaId, newIndex } = await readBody(event);
@@ -96,23 +82,27 @@ export default defineEventHandler(async (event) => {
         }
       }
 
+      // The card has to be where the request says it is. Both areas being
+      // ones this person may edit said nothing about the card itself, so any
+      // card id at all — from a board they cannot even see — could be pulled
+      // into one of their own.
+      const [inArea] = (await db.execute(
+        "SELECT id FROM cards WHERE id = ? AND area = ?",
+        [cardId, fromAreaId],
+      )) as any[];
+      if (!(inArea as any[]).length) {
+        event.res.statusCode = 404;
+        return { error: "Resource not found" };
+      }
+
       {
         try {
-          // Update sort order of other cards in the destination area
-          await db.execute(
-            "UPDATE cards SET sort = sort + 1 WHERE sort >= ? AND area = ?",
-            [newIndex, toAreaId],
-          );
-
-          // Update the targets card's area and sort order
-          await db.execute("UPDATE cards SET area = ?, sort = ? WHERE id = ?", [
-            toAreaId,
-            newIndex,
-            cardId,
-          ]);
-
-          await renumberSortValues(toAreaId);
-          await renumberSortValues(fromAreaId);
+          // `newIndex` counts the cards the board shows in the destination, so
+          // archived ones and gaps are stepped over rather than counted (see
+          // `cardPositions`).
+          await putCard(db, Number(toAreaId), Number(cardId), Number(newIndex));
+          if (Number(fromAreaId) !== Number(toAreaId))
+            await renumberColumn(db, Number(fromAreaId));
 
           // Fetch card name and area names for notification
           const [cardRows] = (await db.execute(

@@ -2,6 +2,7 @@ import { defineEventHandler, readBody } from "h3";
 import { setupDatabase } from "../../../app/lib/databaseSetup";
 import { dispatchWebhooks } from "../../utils/webhooks";
 import { getServerSocket } from "../../utils/socket";
+import { putCardAfter } from "../../utils/cardPositions";
 
 // An attachment is stored one of three ways, and each is duplicated on its own
 // terms:
@@ -93,13 +94,6 @@ export default defineEventHandler(async (event) => {
       return { error: decision.error };
     }
 
-    // The copy belongs directly under the original, not at the foot of a list
-    // that may be long enough to hide it. Everything below moves down one.
-    await db.execute(
-      "UPDATE cards SET sort = sort + 1 WHERE area = ? AND sort > ?",
-      [original.area, original.sort],
-    );
-
     // Everything the card is, except the conversation about it: the title, the
     // description with whatever checklist it holds, the due date, the assignee
     // and the done state. Comments are what people said, in the order they said
@@ -111,12 +105,18 @@ export default defineEventHandler(async (event) => {
         original.name,
         original.content || "",
         original.status ? 1 : 0,
-        Number(original.sort) + 1,
+        Number(original.sort),
         original.dueDate || null,
         original.assignee || null,
       ],
     );
     const newCardId = inserted.insertId;
+
+    // The copy belongs directly under the original, not at the foot of a list
+    // that may be long enough to hide it. Placed in the column's order rather
+    // than by moving every higher number down one: a card that shares the
+    // original's number would otherwise stay between the two.
+    await putCardAfter(db, original.area, newCardId, original.id);
 
     // The same due date wants the same reminders, and none of them has fired
     // for this card yet.
@@ -205,6 +205,7 @@ export default defineEventHandler(async (event) => {
       getServerSocket().to(`board-${board.id}`).emit("addCard", {
         boardId: board.id,
         card,
+        after: original.id,
       });
     }
 
