@@ -1,12 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { placeCard, placeCardAfter } from "../server/utils/cardPositions";
 
-// A column as the database has it, top to bottom; `*` marks an archived card.
+// A column as the database has it, top to bottom; a trailing `*` marks an
+// archived card.
 const column = (spec: string) =>
-  spec.split(" ").map((entry) => ({
-    id: Number(entry.replace("*", "")),
-    archived: entry.endsWith("*"),
-  }));
+  spec.split(" ").map((entry) => {
+    const archived = entry.endsWith("*");
+    return { id: Number(archived ? entry.slice(0, -1) : entry), archived };
+  });
 
 describe("placeCard", () => {
   it("puts a card at the position the board counts, stepping over archived cards", () => {

@@ -1,3 +1,9 @@
+## v0.38.5
+
+### Internal
+
+- **A test helper no longer trips code scanning.** CodeQL flagged `js/incomplete-sanitization` in the card-position tests: the helper that reads a column like `1 2* 3` took the archived marker off with `replace("*", "")`, which only removes the first `*`. It is test code, reads only strings written in the test itself, and every one of them has at most one marker, so nothing was wrong with the results — but it now checks for the trailing `*` and cuts it off, with no `replace` left to flag.
+
 ## v0.38.4
 
 ### Fixes
