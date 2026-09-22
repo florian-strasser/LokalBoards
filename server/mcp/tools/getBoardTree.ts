@@ -1,5 +1,6 @@
 import { defineMcpTool } from "@nuxtjs/mcp-toolkit/server";
 import { setupDatabase } from "../../../app/lib/databaseSetup";
+import { attachAssignees } from "../../utils/cardAssignees";
 import {
   requireUserId,
   requireBoard,
@@ -29,7 +30,7 @@ export default defineMcpTool({
       "SELECT * FROM areas WHERE board = ? AND archivedAt IS NULL ORDER BY sort ASC",
       [id],
     );
-    const [cards]: any = await db.execute(
+    const [cardRows]: any = await db.execute(
       `SELECT c.*,
               (SELECT COUNT(*) FROM comments co WHERE co.card = c.id) AS commentCount,
               (SELECT COUNT(*) FROM attachments a WHERE a.card = c.id) AS attachmentCount
@@ -39,6 +40,7 @@ export default defineMcpTool({
        ORDER BY c.sort ASC`,
       [id],
     );
+    const cards = await attachAssignees(db, cardRows);
 
     const cardsByArea = new Map<number, any[]>();
     for (const card of cards) {

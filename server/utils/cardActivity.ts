@@ -14,7 +14,9 @@ export type CardActivityType =
   | "due"
   | "labels"
   | "archived"
-  | "restored";
+  | "restored"
+  | "repeat"
+  | "repeated";
 
 export async function recordCardActivity(
   card: number | string,

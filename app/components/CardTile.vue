@@ -29,24 +29,7 @@
                  does have counts the avatar was the width that pushed them onto
                  a line of their own. Up here it costs nothing either way, and it
                  is the first thing you look for. -->
-            <div
-                v-if="props.card.assignee"
-                class="shrink-0 grow-0"
-                v-tooltip="props.card.assigneeName || ''"
-            >
-                <img
-                    v-if="props.card.assigneeImage"
-                    :src="props.card.assigneeImage"
-                    class="w-6 h-6 rounded-full object-cover"
-                    :alt="props.card.assigneeName || ''"
-                />
-                <div
-                    v-else
-                    class="w-6 h-6 rounded-full bg-primary text-white flex items-center justify-center text-xs"
-                >
-                    {{ (props.card.assigneeName || "?").substring(0, 1) }}
-                </div>
-            </div>
+            <AssigneeAvatars :people="peopleOn(props.card)" />
         </div>
         <!-- One line under the name for everything the card has to say about
              itself: what it is, then what it holds. Labels had a line of their
@@ -121,6 +104,13 @@
             >
                 <Clock class="size-4 shrink-0 grow-0" />
                 <span class="shrink-0 grow-0">{{ dueDateLabel }}</span>
+                <!-- Repeats once it is done: the next one is already
+                     scheduled, which is worth knowing before ticking it. -->
+                <Repeat
+                    v-if="props.card.repeatEvery"
+                    class="size-4 shrink-0 grow-0"
+                    :aria-label="$t('repeats')"
+                />
             </div>
         </div>
     </button>
@@ -132,7 +122,10 @@ import {
     MessageSquareText,
     Paperclip,
     Clock,
+    Repeat,
 } from "lucide-vue-next";
+
+import { peopleOn } from "@/utils/boardFilter";
 
 // Dates render in the instance's timezone and language, identically on the
 // server and in the browser — see the composable.

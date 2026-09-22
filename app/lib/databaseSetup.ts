@@ -1288,6 +1288,60 @@ const migrations: Migration[] = [
     },
   },
 
+  {
+    // Cards that repeat (see `server/utils/repeat.ts`). A rhythm, the date the
+    // series is counted from, and the column the next card goes to. All three
+    // empty on every card that does not repeat, which is every card there is
+    // when this runs.
+    id: "0029_repeating_cards",
+    up: async (db) => {
+      const columns: [string, string][] = [
+        ["repeatEvery", "varchar(16) COLLATE utf8mb4_general_ci DEFAULT NULL"],
+        ["repeatAnchor", "timestamp NULL DEFAULT NULL"],
+        ["repeatArea", "int DEFAULT NULL"],
+      ];
+      for (const [column, definition] of columns) {
+        if (!(await columnExists(db, "cards", column))) {
+          await db.execute(
+            `ALTER TABLE \`cards\` ADD COLUMN \`${column}\` ${definition}`,
+          );
+        }
+      }
+    },
+  },
+
+  {
+    // A card can be on several people (see `server/utils/cardAssignees.ts`).
+    // The single `cards.assignee` column becomes rows of their own, every
+    // existing assignment is carried over as the card's first, and the column
+    // goes: leaving it behind would leave a second answer to "who is on this
+    // card" that nothing keeps up to date.
+    //
+    // `user` has the collation of `user.id` and `invitations.user`, which it is
+    // joined against.
+    id: "0030_card_assignees",
+    up: async (db) => {
+      await db.execute(`CREATE TABLE IF NOT EXISTS \`card_assignees\` (
+        \`id\` int NOT NULL AUTO_INCREMENT,
+        \`card\` int NOT NULL,
+        \`user\` varchar(255) COLLATE utf8mb4_0900_ai_ci NOT NULL,
+        PRIMARY KEY (\`id\`),
+        UNIQUE KEY \`card_assignees_card_user\` (\`card\`, \`user\`),
+        KEY \`card_assignees_user\` (\`user\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;`);
+
+      if (await columnExists(db, "cards", "assignee")) {
+        await db.execute(
+          "INSERT IGNORE INTO `card_assignees` (`card`, `user`) SELECT `id`, `assignee` FROM `cards` WHERE `assignee` IS NOT NULL AND `assignee` <> '' ORDER BY `id`",
+        );
+        if (await indexExists(db, "cards", "cards_assignee")) {
+          await db.execute("ALTER TABLE `cards` DROP INDEX `cards_assignee`");
+        }
+        await db.execute("ALTER TABLE `cards` DROP COLUMN `assignee`");
+      }
+    },
+  },
+
   // To add a further schema change, append a new migration here, e.g.:
   // {
   //   id: "0015_add_x",

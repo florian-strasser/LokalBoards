@@ -216,27 +216,9 @@
                                          board's own tile: a hit whose only
                                          extra is an avatar should not grow a
                                          second row to hold it. -->
-                                    <span
-                                        v-if="card.assignee"
-                                        class="shrink-0 grow-0"
-                                        :title="card.assigneeName || ''"
-                                    >
-                                        <img
-                                            v-if="card.assigneeImage"
-                                            :src="card.assigneeImage"
-                                            :alt="card.assigneeName || ''"
-                                            class="size-6 rounded-full object-cover"
-                                        />
-                                        <span
-                                            v-else
-                                            class="bg-primary flex size-6 items-center justify-center rounded-full text-xs text-white"
-                                            >{{
-                                                (
-                                                    card.assigneeName || "?"
-                                                ).substring(0, 1)
-                                            }}</span
-                                        >
-                                    </span>
+                                    <AssigneeAvatars
+                                        :people="peopleOn(card)"
+                                    />
                                 </span>
                 <!-- The card's own line, as on the board: what it is, then
                      what it holds. The labels are also why the hit is here at
@@ -414,6 +396,7 @@ import {
     MessageSquareText,
     Clock,
 } from "lucide-vue-next";
+import { peopleOn } from "@/utils/boardFilter";
 
 // Dates render in the instance's timezone and language, like everywhere else.
 const { formatServerDate } = useServerDate();

@@ -103,6 +103,14 @@
                             <Download class="size-4 shrink-0" />
                             {{ $t("exportBoard") }}
                         </button>
+                        <button
+                            type="button"
+                            @click="exportBoardCsv"
+                            :class="menuItemClass"
+                        >
+                            <FileSpreadsheet class="size-4 shrink-0" />
+                            {{ $t("exportSpreadsheet") }}
+                        </button>
                         <template v-if="userID === boardUser">
                             <button
                                 type="button"
@@ -463,6 +471,7 @@ import {
     UserRoundPlus,
     Ban,
     X,
+    FileSpreadsheet,
 } from "lucide-vue-next";
 import { Plus } from "lucide-vue-next";
 
@@ -727,6 +736,11 @@ watch(
 
 const exportBoard = () =>
     startDownload(`/api/data/board-export?boardId=${boardID.value}`);
+// The cards as rows, for a spreadsheet.
+const exportBoardCsv = () =>
+    startDownload(
+        `/api/data/board-export?boardId=${boardID.value}&format=csv`,
+    );
 
 // Sync cardModal with query param
 if (route.query.card) {

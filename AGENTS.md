@@ -13,6 +13,12 @@ Kanban tool your team uses, now scriptable.
   - **Read-only** — read tools only; write tools are rejected with `FORBIDDEN`.
     Ideal for an agent that should only report on boards. The restriction also
     covers the REST API, so a read-only key cannot write through either surface.
+- **Or OAuth**, for clients that cannot send a key — ChatGPT's custom
+  connectors are the common case. Point the client at `/mcp` with no key; it
+  discovers the rest, sends you to your instance to sign in, and asks you to
+  allow it, read-only if you like. Connections are listed and revoked under
+  **Settings → Connected apps**. The details are in the
+  [MCP server documentation](https://www.lokalboards.com/docs/mcp-server#connecting-with-oauth).
 
 Example with the official SDK:
 
@@ -33,7 +39,8 @@ await client.connect(transport);
 - A **board** contains ordered **areas** (columns/lists).
 - An **area** contains ordered **cards** (tasks).
 - A **card** has a name, a Markdown `content` (description), a `done` flag, an
-  optional `dueDate` and `assigneeId`, plus **comments** and **attachments**.
+  optional `dueDate` (which can repeat), the people on it (`assigneeIds`, with
+  `assigneeId` as the first of them), plus **comments** and **attachments**.
 
 Ids are integers returned by the list/get tools. Positions are 0-based.
 
@@ -50,7 +57,7 @@ HTML is escaped when rendered.
    board (areas + cards) in one call — prefer it over `listAreas` + `listCards`.
    Use `searchCards` to find cards by text **or by filter**.
 3. Act with the create/update/move/delete tools using the ids from those reads.
-   `listBoardMembers(boardId)` gives the userIds to use as `assigneeId`.
+   `listBoardMembers(boardId)` gives the userIds to use in `assigneeIds`.
 
 ## Working tasks (the agent loop)
 
@@ -59,12 +66,13 @@ searchCards({ areaId: <to-do column>, done: false, unassigned: true })
   → claimCard(cardId)          # atomic: skip the card if claimed === false
   → …do the work…
   → writeComment(cardId, "<what you did>")
-  → updateCard({ cardId, done: true })
+  → updateCard({ cardId, done: true })   # a repeating card returns the next one as `next`
   → moveCard({ cardId, toAreaId: <done column> })
 ```
 
-- **Always claim before working.** `claimCard` only succeeds if the card is
-  unassigned (or already yours). If it returns `claimed: false`, `heldBy` tells
+- **Always claim before working.** `claimCard` only succeeds if nobody is on
+  the card (or you already are) — atomically, so two agents racing for one card
+  cannot both win. If it returns `claimed: false`, `heldBy` tells
   you who has it — move on to the next card. This is what keeps two agents, or
   an agent and a human, from doing the same task twice.
 - **Release what you abandon** with `releaseCard`, or it stays claimed.

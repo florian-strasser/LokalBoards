@@ -4,6 +4,13 @@ import { pruneUnusedLabels } from "../../utils/labelCleanup";
 import { dispatchWebhooks } from "../../utils/webhooks";
 import { getServerSocket } from "../../utils/socket";
 import { nextCardSort } from "../../utils/cardPositions";
+import { isRepeatEvery, repeatAfterEdit } from "../../utils/repeat";
+import { repeatCard } from "../../utils/repeatCard";
+import {
+  assigneeIdsFrom,
+  attachAssignees,
+  setCardAssignees,
+} from "../../utils/cardAssignees";
 
 // Function to handle file uploads
 async function handleFileUpload(db, cardID, file) {
@@ -107,6 +114,7 @@ export default defineEventHandler(async (event) => {
           [cardId],
         );
         card.labels = labelRows;
+        Object.assign(card, (await attachAssignees(db, [card]))[0]);
 
         return { card, attachments };
       }
@@ -157,7 +165,9 @@ export default defineEventHandler(async (event) => {
         const [rows] = await db.execute("SELECT * FROM cards WHERE id = ?", [
           result.insertId,
         ]);
-        const card = rows[0];
+        // Nobody is on a new card yet; saying so in the same shape as every
+        // other card keeps the board from having to guess.
+        const card = Object.assign(rows[0], (await attachAssignees(db, [rows[0]]))[0]);
 
         // Fetch all users who have access to the board (owner and invited users)
         const [boardRows] = await db.execute(
@@ -227,8 +237,31 @@ export default defineEventHandler(async (event) => {
       }
     } else if (method === "PUT") {
       // Handle PUT request to update an existing card
-      const { cardID, name, content, status, files, dueDate, assignee, reminders, labelIds } =
-        await readBody(event);
+      const body = await readBody(event);
+      const { cardID, name, content, status, files, dueDate, reminders, labelIds, repeatEvery } =
+        body;
+
+      // Who is on the card: `assignees` replaces the whole set; the older
+      // single `assignee` still works and replaces it with that one person, or
+      // with nobody. Sending neither leaves the people alone, the same as
+      // `labelIds` and `reminders`.
+      const wantedAssignees: string[] | null = Array.isArray(body?.assignees)
+        ? assigneeIdsFrom(body.assignees)
+        : body && "assignee" in body
+          ? assigneeIdsFrom(body.assignee ? [body.assignee] : [])
+          : null;
+
+      // Absent leaves the rhythm alone, empty stops it; anything else has to be
+      // one of the rhythms there are.
+      if (
+        repeatEvery !== undefined &&
+        repeatEvery !== null &&
+        repeatEvery !== "" &&
+        !isRepeatEvery(repeatEvery)
+      ) {
+        event.res.statusCode = 400;
+        return { error: "Invalid repeat value" };
+      }
 
       // HIGH FIX: Validate required fields with generic message
       if (!cardID || !name) {
@@ -281,21 +314,40 @@ export default defineEventHandler(async (event) => {
         const originalStatus = !!originalCard.status;
         const newStatus = !!status;
 
-        // Normalize the new due date / assignee.
+        // Normalize the new due date.
         const newDue = dueDate ? new Date(dueDate) : null;
-        const newAssignee = assignee || null;
         const oldDue = originalCard.dueDate
           ? new Date(originalCard.dueDate)
           : null;
         const dueChanged =
           (newDue ? newDue.getTime() : null) !==
           (oldDue ? oldDue.getTime() : null);
+        const repeat = repeatAfterEdit(
+          originalCard,
+          repeatEvery,
+          newDue,
+          dueChanged,
+        );
 
         // Update the card
         await db.execute(
-          "UPDATE cards SET name = ?, content = ?, status = ?, dueDate = ?, assignee = ? WHERE id = ?",
-          [name, content || "", status ? 1 : 0, newDue, newAssignee, cardID],
+          "UPDATE cards SET name = ?, content = ?, status = ?, dueDate = ?, repeatEvery = ?, repeatAnchor = ?, repeatArea = ? WHERE id = ?",
+          [
+            name,
+            content || "",
+            status ? 1 : 0,
+            newDue,
+            repeat.repeatEvery,
+            repeat.repeatAnchor,
+            repeat.repeatArea,
+            cardID,
+          ],
         );
+        if (repeat.repeatEvery !== (originalCard.repeatEvery || null)) {
+          await recordCardActivity(cardID, "repeat", userId, {
+            every: repeat.repeatEvery,
+          });
+        }
 
         // Sync the reminder schedule when the client provided one, preserving
         // the `notified` flag of reminders that stay unchanged.
@@ -417,33 +469,51 @@ export default defineEventHandler(async (event) => {
           );
         }
 
-        // Notify a newly assigned user (not when clearing, re-saving the same
-        // assignee, or assigning yourself).
-        if (
-          newAssignee &&
-          newAssignee !== (originalCard.assignee || null) &&
-          newAssignee !== userId
-        ) {
-          const [assignerRows]: any = await db.execute(
-            "SELECT name FROM user WHERE id = ?",
-            [userId],
+        // Who came on and who went off. Both go in the card's history; the
+        // people put on it by somebody else are told, and nobody is told that
+        // they put themselves on a card.
+        if (wantedAssignees !== null) {
+          const change = await setCardAssignees(
+            db,
+            Number(cardID),
+            board.id,
+            wantedAssignees,
           );
+          const [assignerRows]: any = change.added.length
+            ? await db.execute("SELECT name FROM user WHERE id = ?", [userId])
+            : [[]];
           const assignerName = assignerRows[0]?.name || "Someone";
-          await recordCardActivity(cardID, "assigned", userId, {
-            assigneeId: newAssignee,
-          });
-          await db.execute(
-            "INSERT INTO notifications (userId, type, boardId, cardId, message, actorId) VALUES (?, ?, ?, ?, ?, ?)",
-            [
-              newAssignee,
-              "card_assigned",
-              board.id,
-              cardID,
-              `"${assignerName}" assigned you the card "${name}"`,
-                            userId,
+          for (const assigneeId of change.added) {
+            await recordCardActivity(cardID, "assigned", userId, {
+              assigneeId,
+            });
+            if (assigneeId === userId) continue;
+            await db.execute(
+              "INSERT INTO notifications (userId, type, boardId, cardId, message, actorId) VALUES (?, ?, ?, ?, ?, ?)",
+              [
+                assigneeId,
+                "card_assigned",
+                board.id,
+                cardID,
+                `"${assignerName}" assigned you the card "${name}"`,
+                userId,
               ],
-          );
+            );
+          }
+          for (const assigneeId of change.removed) {
+            await recordCardActivity(cardID, "assigned", userId, {
+              assigneeId,
+              removed: true,
+            });
+          }
         }
+
+        // Done, and a repeating card: the next one goes on the board now, so the
+        // card read back below is already the one that no longer repeats.
+        const next =
+          !originalStatus && newStatus
+            ? await repeatCard(db, Number(cardID), userId)
+            : null;
 
         // Handle file uploads if present
         let newAttachments = [];
@@ -548,6 +618,9 @@ export default defineEventHandler(async (event) => {
           [cardID],
         );
         card.labels = currentLabels;
+        // Who is on it now — the same object is what the broadcast below
+        // sends, so other boards learn it too.
+        Object.assign(card, (await attachAssignees(db, [card]))[0]);
 
         // Emit socket event for card update (only for API calls, not frontend)
         if (auth.viaApiKey) {
@@ -566,7 +639,7 @@ export default defineEventHandler(async (event) => {
           card: { id: card?.id, name: card?.name, done: !!card?.status },
         });
 
-        return { card, attachments };
+        return { card, attachments, next };
       }
     } else if (method === "DELETE") {
       // Handle DELETE request: archives the card, or removes it for good when

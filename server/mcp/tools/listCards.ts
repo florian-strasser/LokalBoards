@@ -1,5 +1,6 @@
 import { defineMcpTool } from "@nuxtjs/mcp-toolkit/server";
 import { setupDatabase } from "../../../app/lib/databaseSetup";
+import { attachAssignees } from "../../utils/cardAssignees";
 import {
   requireUserId,
   requireArea,
@@ -14,7 +15,7 @@ export default defineMcpTool({
   name: "listCards",
   title: "List cards",
   description:
-    "List the cards in an area, in order. Each card has id, areaId, name, Markdown content, done (boolean), dueDate (ISO 8601 or null), assigneeId and position. Requires read access to the board.",
+    "List the cards in an area, in order. Each card has id, areaId, name, Markdown content, done (boolean), dueDate (ISO 8601 or null), repeat, assigneeIds (everyone on it), assigneeId (the first of them) and position. Requires read access to the board.",
   annotations: { readOnlyHint: true, openWorldHint: false },
   inputSchema: { ...areaIdInput },
   inputExamples: [{ areaId: 1 }],
@@ -26,6 +27,7 @@ export default defineMcpTool({
       "SELECT * FROM cards WHERE area = ? AND archivedAt IS NULL ORDER BY sort ASC, id ASC",
       [id],
     );
-    return jsonResult({ cards: rows.map(serializeCard) });
+    const cards = await attachAssignees(db, rows);
+    return jsonResult({ cards: cards.map(serializeCard) });
   },
 });

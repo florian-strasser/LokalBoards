@@ -127,6 +127,8 @@
                         type="button"
                         :disabled="!props.writeAccess"
                         class="flex items-center justify-center size-8 rounded-full shrink-0 grow-0"
+                        :aria-label="$t('filterDone')"
+                        :aria-pressed="currentStatus"
                         @click="toggleStatus"
                         :class="{
                             'bg-primary border-2 border-primary text-white':
@@ -197,13 +199,13 @@
                     v-if="
                         writeAccess ||
                         dueDate ||
-                        assignee ||
+                        assignees.length ||
                         cardLabels.length
                     "
                     class="mb-4"
                 >
                     <div
-                        v-if="writeAccess || dueDate || assignee"
+                        v-if="writeAccess || dueDate || assignees.length"
                         class="flex flex-wrap items-center gap-2"
                     >
                         <!-- Due date -->
@@ -216,6 +218,11 @@
                                             ? formatDateTime(dueDate)
                                             : $t("dueDate")
                                     }}</span>
+                                    <Repeat
+                                        v-if="dueDate && repeatEvery"
+                                        class="size-4 shrink-0"
+                                        :aria-label="$t(repeatLabel)"
+                                    />
                                 </button>
                             </template>
                             <template #default>
@@ -276,6 +283,30 @@
                                             </option>
                                         </select>
                                     </div>
+                                    <!-- How it repeats. A property of the due
+                                         date: marking the card done puts the
+                                         next one on the board, due at the next
+                                         date in the series. -->
+                                    <div v-if="dueDate">
+                                        <label
+                                            class="block text-sm font-bold text-dark dark:text-white mb-1"
+                                        >
+                                            {{ $t("repeat") }}
+                                        </label>
+                                        <select
+                                            v-model="repeatEvery"
+                                            @change="saveCard"
+                                            class="form-control text-sm"
+                                        >
+                                            <option
+                                                v-for="option in REPEAT_OPTIONS"
+                                                :key="option.value"
+                                                :value="option.value"
+                                            >
+                                                {{ $t(option.label) }}
+                                            </option>
+                                        </select>
+                                    </div>
                                     <button
                                         v-if="dueDate"
                                         type="button"
@@ -291,31 +322,37 @@
                         <div v-else-if="dueDate" :class="chipClass(true)">
                             <Clock class="size-4 shrink-0" />
                             <span>{{ formatDateTime(dueDate) }}</span>
+                            <Repeat
+                                v-if="repeatEvery"
+                                class="size-4 shrink-0"
+                                :aria-label="$t(repeatLabel)"
+                            />
                         </div>
 
-                        <!-- Assignee -->
+                        <!-- Who is on it. A card can be on several people,
+                             so each row puts that person on or takes them off
+                             and the menu stays open for the next one; the
+                             first row takes everybody off. -->
                         <PopoverMenu v-if="writeAccess">
                             <template #trigger>
                                 <button
                                     type="button"
-                                    :class="chipClass(!!assignee)"
+                                    :class="chipClass(assignees.length > 0)"
                                 >
-                                    <span
-                                        v-if="assignee && assigneeImage"
-                                        class="size-5 rounded-full overflow-hidden shrink-0"
-                                    >
-                                        <img
-                                            :src="assigneeImage"
-                                            class="w-full h-full object-cover"
-                                        />
-                                    </span>
+                                    <AssigneeAvatars
+                                        v-if="assignees.length"
+                                        :people="assignedPeople"
+                                        size="sm"
+                                    />
                                     <UserPlus v-else class="size-4 shrink-0" />
-                                    <span>{{
-                                        assignee ? assigneeName : $t("assignee")
+                                    <span class="truncate max-w-56">{{
+                                        assignees.length
+                                            ? assignedNames
+                                            : $t("assignee")
                                     }}</span>
                                 </button>
                             </template>
-                            <template #default="{ close }">
+                            <template #default>
                                 <div class="w-56">
                                     <label
                                         class="block text-sm font-bold text-dark dark:text-white mb-2"
@@ -328,7 +365,7 @@
                                         <li>
                                             <button
                                                 type="button"
-                                                @click="setAssignee('', close)"
+                                                @click="clearAssignees"
                                                 class="flex items-center gap-2 w-full px-2 py-1.5 rounded-lg hover:bg-primary/10 dark:hover:bg-white/10 text-dark dark:text-white"
                                             >
                                                 <span
@@ -340,7 +377,7 @@
                                                     $t("unassigned")
                                                 }}</span>
                                                 <Check
-                                                    v-if="!assignee"
+                                                    v-if="!assignees.length"
                                                     class="size-4 text-primary shrink-0"
                                                 />
                                             </button>
@@ -348,7 +385,10 @@
                                         <li v-for="m in members" :key="m.id">
                                             <button
                                                 type="button"
-                                                @click="setAssignee(m.id, close)"
+                                                :aria-pressed="
+                                                    assignees.includes(m.id)
+                                                "
+                                                @click="toggleAssignee(m.id)"
                                                 class="flex items-center gap-2 w-full px-2 py-1.5 rounded-lg hover:bg-primary/10 dark:hover:bg-white/10 text-dark dark:text-white"
                                             >
                                                 <span
@@ -367,7 +407,7 @@
                                                     m.name
                                                 }}</span>
                                                 <Check
-                                                    v-if="assignee === m.id"
+                                                    v-if="assignees.includes(m.id)"
                                                     class="size-4 text-primary shrink-0"
                                                 />
                                             </button>
@@ -376,18 +416,17 @@
                                 </div>
                             </template>
                         </PopoverMenu>
-                        <div v-else-if="assignee" :class="chipClass(true)">
-                            <span
-                                v-if="assigneeImage"
-                                class="size-5 rounded-full overflow-hidden shrink-0"
-                            >
-                                <img
-                                    :src="assigneeImage"
-                                    class="w-full h-full object-cover"
-                                />
-                            </span>
-                            <UserPlus v-else class="size-4 shrink-0" />
-                            <span>{{ assigneeName }}</span>
+                        <div
+                            v-else-if="assignees.length"
+                            :class="chipClass(true)"
+                        >
+                            <AssigneeAvatars
+                                :people="assignedPeople"
+                                size="sm"
+                            />
+                            <span class="truncate max-w-56">{{
+                                assignedNames
+                            }}</span>
                         </div>
                         <!-- Labels -->
                         <LabelPicker
@@ -528,6 +567,7 @@
 </template>
 <script setup lang="ts">
 import { socket } from "~/lib/socket";
+import { peopleOn } from "@/utils/boardFilter";
 import {
     Check,
     CopyPlus,
@@ -542,6 +582,7 @@ import {
     Clock,
     UserPlus,
     Upload,
+    Repeat,
 } from "lucide-vue-next";
 
 // Dates render in the instance's timezone and language, identically on the
@@ -690,8 +731,15 @@ const activityVersion = ref(0);
 
 // --- Due date, assignee & reminders -------------------------------------
 const dueDate = ref(props.card.dueDate || ""); // ISO string, or "" when unset
-const assignee = ref(props.card.assignee || "");
+// Who is on the card, by id. The people themselves come from the board's
+// member list once it has loaded, and until then from what the card arrived
+// with — so the faces are right from the first frame.
+const assignees = ref(peopleOn(props.card).map((person) => person.id));
+const knownPeople = new Map(
+    peopleOn(props.card).map((person) => [person.id, person]),
+);
 const reminders = ref([...(props.card.reminders || [])]);
+const repeatEvery = ref(props.card.repeatEvery || ""); // "" when it does not repeat
 const members = ref([]); // board members for the assignee picker
 // The labels themselves rather than their ids: they are what the tile behind
 // this modal draws, so a label added here reaches it without waiting for the
@@ -720,27 +768,47 @@ const availableReminderPresets = computed(() =>
     REMINDER_PRESETS.filter((p) => !reminders.value.includes(p.minutes)),
 );
 
+const REPEAT_OPTIONS = [
+    { value: "", label: "repeatNever" },
+    { value: "day", label: "repeatDay" },
+    { value: "week", label: "repeatWeek" },
+    { value: "twoWeeks", label: "repeatTwoWeeks" },
+    { value: "month", label: "repeatMonth" },
+    { value: "year", label: "repeatYear" },
+];
+const repeatLabel = computed(
+    () =>
+        REPEAT_OPTIONS.find((option) => option.value === repeatEvery.value)
+            ?.label ?? "repeatNever",
+);
+
 const reminderLabel = (minutes) => {
     const preset = REMINDER_PRESETS.find((p) => p.minutes === minutes);
     return preset ? $t(preset.label) : `${minutes} min`;
 };
 
-const assigneeName = computed(() => {
-    if (!assignee.value) return "";
-    const member = members.value.find((m) => m.id === assignee.value);
-    return member ? member.name : props.card.assigneeName || "";
-});
+const assignedPeople = computed(() =>
+    assignees.value.map(
+        (id) =>
+            members.value.find((m) => m.id === id) ??
+            knownPeople.get(id) ?? { id, name: "?", image: null },
+    ),
+);
+const assignedNames = computed(() =>
+    assignedPeople.value.map((person) => person.name || "?").join(", "),
+);
 
-const assigneeImage = computed(() => {
-    if (!assignee.value) return "";
-    const member = members.value.find((m) => m.id === assignee.value);
-    return member ? member.image : props.card.assigneeImage || "";
-});
-
-const setAssignee = (id, close) => {
-    assignee.value = id;
+const toggleAssignee = (id) => {
+    assignees.value = assignees.value.includes(id)
+        ? assignees.value.filter((existing) => existing !== id)
+        : [...assignees.value, id];
     saveCard();
-    if (close) close();
+};
+
+const clearAssignees = () => {
+    if (!assignees.value.length) return;
+    assignees.value = [];
+    saveCard();
 };
 
 const pad = (n) => String(n).padStart(2, "0");
@@ -766,8 +834,10 @@ const formatDateTime = (iso) =>
         minute: "2-digit",
     });
 
+// Without a due date there is nothing to repeat, so the rhythm goes with it.
 const clearDueDate = () => {
     dueDate.value = "";
+    repeatEvery.value = "";
     saveCard();
 };
 
@@ -1127,20 +1197,19 @@ const saveCard = async () => {
     // Optimistically update the board immediately (while this modal is still
     // mounted) so a quick close→reopen shows the change even if the request —
     // and its post-save emit — outlives the modal.
-    const assigneeMemberNow = members.value.find(
-        (m) => m.id === assignee.value,
-    );
     emits("card-updated", {
         id: props.cardID,
         name: name.value,
         content: content.value,
         status: currentStatus.value,
         dueDate: dueDate.value || null,
-        assignee: assignee.value || null,
+        repeatEvery: repeatEvery.value || null,
+        assignees: [...assignedPeople.value],
+        assignee: assignees.value[0] ?? null,
+        assigneeName: assignedPeople.value[0]?.name ?? null,
+        assigneeImage: assignedPeople.value[0]?.image ?? null,
         reminders: [...reminders.value],
         labels: cardLabels.value.map(({ id, name }) => ({ id, name })),
-        assigneeName: assigneeMemberNow?.name ?? null,
-        assigneeImage: assigneeMemberNow?.image ?? null,
     });
 
     try {
@@ -1153,11 +1222,22 @@ const saveCard = async () => {
                 status: currentStatus.value,
                 files: newAttachments.value,
                 dueDate: dueDate.value || null,
-                assignee: assignee.value || null,
+                repeatEvery: repeatEvery.value || null,
+                assignees: assignees.value,
                 reminders: reminders.value,
                 labelIds: cardLabels.value.map((label) => label.id),
             },
         });
+        // A repeating card that was just marked done has handed its rhythm on
+        // to the next one, which the server has already put on the board.
+        repeatEvery.value = response.card?.repeatEvery || "";
+        if (response.next) {
+            await nuxtApp.callHook("app:toast", {
+                message: $t("repeatNextCreated", {
+                    date: formatDateTime(response.next.dueDate),
+                }),
+            });
+        }
         // Update the attachments list with the new attachments
         if (response.attachments) {
             attachments.value = [...attachments.value, ...response.attachments];
@@ -1166,10 +1246,8 @@ const saveCard = async () => {
 
         // Include the prefetched comments and attachment metadata so the
         // board keeps a complete card object and the modal can be reopened
-        // without a layout shift.
-        const assigneeMember = members.value.find(
-            (m) => m.id === (response.card.assignee || ""),
-        );
+        // without a layout shift. The people on it come back from the server
+        // with their names and pictures.
         emits("card-updated", {
             ...response.card,
             comments: comments.value,
@@ -1178,8 +1256,6 @@ const saveCard = async () => {
             ),
             reminders: response.card.reminders ?? reminders.value,
             labels: cardLabels.value.map(({ id, name }) => ({ id, name })),
-            assigneeName: assigneeMember?.name ?? null,
-            assigneeImage: assigneeMember?.image ?? null,
         });
         socket.emit("cardUpdated", {
             boardId: props.boardID,
@@ -1271,8 +1347,16 @@ const handleCardUpdated = (updatedCard, updatedAttachments) => {
         currentStatus.value = updatedCard.status;
         if (updatedCard.dueDate !== undefined)
             dueDate.value = updatedCard.dueDate || "";
-        if (updatedCard.assignee !== undefined)
-            assignee.value = updatedCard.assignee || "";
+        if (updatedCard.repeatEvery !== undefined)
+            repeatEvery.value = updatedCard.repeatEvery || "";
+        if (
+            Array.isArray(updatedCard.assignees) ||
+            updatedCard.assignee !== undefined
+        ) {
+            const people = peopleOn(updatedCard);
+            for (const person of people) knownPeople.set(person.id, person);
+            assignees.value = people.map((person) => person.id);
+        }
         if (Array.isArray(updatedCard.reminders))
             reminders.value = [...updatedCard.reminders];
         if (Array.isArray(updatedCard.labels))

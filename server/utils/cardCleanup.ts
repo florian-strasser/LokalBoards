@@ -54,6 +54,10 @@ export async function removeCardData(
     ids,
   );
   await db.execute(
+    `DELETE FROM card_assignees WHERE card IN (${placeholders})`,
+    ids,
+  );
+  await db.execute(
     `DELETE FROM notifications WHERE cardId IN (${placeholders})`,
     ids,
   );

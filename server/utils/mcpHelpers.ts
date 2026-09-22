@@ -196,6 +196,14 @@ export function serializeArea(area: any) {
 }
 
 export function serializeCard(card: any) {
+  // Everyone on the card, when the caller has attached them (see
+  // `attachAssignees`); `assigneeId` is the first of them, which is what it
+  // meant before a card could be on more than one person.
+  const assigneeIds: string[] = Array.isArray(card.assignees)
+    ? card.assignees.map((person: any) => person.id)
+    : card.assignee
+      ? [card.assignee]
+      : [];
   return {
     id: card.id,
     areaId: card.area,
@@ -204,7 +212,10 @@ export function serializeCard(card: any) {
     content: card.content ?? "",
     done: !!card.status,
     dueDate: card.dueDate ? new Date(card.dueDate).toISOString() : null,
-    assigneeId: card.assignee ?? null,
+    assigneeIds,
+    assigneeId: assigneeIds[0] ?? null,
+    // How it repeats once done, or null. See `server/utils/repeat.ts`.
+    repeat: card.repeatEvery ?? null,
     position: card.sort ?? 0,
     ...(card.commentCount != null ? { commentCount: card.commentCount } : {}),
     ...(card.attachmentCount != null

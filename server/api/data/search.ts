@@ -2,6 +2,7 @@ import { defineEventHandler, getQuery } from "h3";
 import { setupDatabase } from "../../../app/lib/databaseSetup";
 // The same parser the board uses, so a result and its tile can never disagree.
 import { checklistProgress } from "../../../app/utils/checklistProgress";
+import { attachAssignees } from "../../utils/cardAssignees";
 
 // GET /api/data/search?q=…
 //
@@ -58,18 +59,16 @@ export default defineEventHandler(async (event) => {
     );
 
     // The same fields a card tile shows on the board, so a hit carries its
-    // checklist progress, comment and attachment counts, due date and assignee
-    // rather than just a name.
-    const [cards]: any = await db.execute(
-      `SELECT c.id, c.name, c.content, c.status, c.dueDate, c.assignee,
-              au.name AS assigneeName, au.image AS assigneeImage,
+    // checklist progress, comment and attachment counts, due date and the
+    // people on it rather than just a name.
+    const [cardRows]: any = await db.execute(
+      `SELECT c.id, c.name, c.content, c.status, c.dueDate,
               (SELECT COUNT(*) FROM comments co WHERE co.card = c.id) AS commentCount,
               (SELECT COUNT(*) FROM attachments att WHERE att.card = c.id) AS attachmentCount,
               a.name AS areaName, b.id AS boardId, b.name AS boardName
          FROM cards c
          JOIN areas a ON a.id = c.area
          JOIN boards b ON b.id = a.board
-         LEFT JOIN \`user\` au ON au.id = c.assignee
         WHERE ${ACCESSIBLE} AND ${LIVE_CARD} AND (
                 c.name LIKE ? ESCAPE '\\\\'
                 OR c.content LIKE ? ESCAPE '\\\\'
@@ -83,6 +82,7 @@ export default defineEventHandler(async (event) => {
         LIMIT ${PER_GROUP}`,
       [userId, userId, like, like, like, like],
     );
+    const cards = await attachAssignees(db, cardRows);
 
     // A card's labels travel with it, for two reasons: a hit found by its label
     // should show the word that found it, and a card that says "Bug" on the
@@ -190,6 +190,7 @@ export default defineEventHandler(async (event) => {
         boardId: c.boardId,
         boardName: c.boardName,
         dueDate: c.dueDate,
+        assignees: c.assignees,
         assignee: c.assignee,
         assigneeName: c.assigneeName,
         assigneeImage: c.assigneeImage,

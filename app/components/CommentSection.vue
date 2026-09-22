@@ -367,16 +367,38 @@ const timeline = computed(() => {
     return items.sort((x, y) => y.date - x.date || y.seq - x.seq);
 });
 
+const REPEAT_LABELS: Record<string, string> = {
+    day: "repeatDay",
+    week: "repeatWeek",
+    twoWeeks: "repeatTwoWeeks",
+    month: "repeatMonth",
+    year: "repeatYear",
+};
+
 const activityText = (a: any): string => {
     const d = a.data || {};
     switch (a.type) {
         case "created":
-            return $t("activityCreated");
+            return d.repeatedFrom
+                ? $t("activityCreatedRepeat")
+                : $t("activityCreated");
         case "status":
             return d.done ? $t("activityCompleted") : $t("activityReopened");
         case "moved":
             return $t("activityMoved", { from: d.from ?? "?", to: d.to ?? "?" });
         case "assigned":
+            // Somebody putting themselves on a card took it on; nobody
+            // "assigned it to" themselves.
+            if (d.assigneeId && d.assigneeId === a.actorId)
+                return d.removed
+                    ? $t("activityUnassignedSelf")
+                    : $t("activityAssignedSelf");
+            // Somebody taken off a card that can be on several people is a
+            // name, not "the assignee".
+            if (d.removed)
+                return d.assigneeName
+                    ? $t("activityUnassignedPerson", { name: d.assigneeName })
+                    : $t("activityUnassigned");
             return d.assigneeName
                 ? $t("activityAssigned", { name: d.assigneeName })
                 : $t("activityUnassigned");
@@ -392,6 +414,22 @@ const activityText = (a: any): string => {
                       }),
                   })
                 : $t("activityDueCleared");
+        case "repeat":
+            return d.every
+                ? $t("activityRepeatSet", {
+                      every: $t(REPEAT_LABELS[d.every] ?? "repeatNever"),
+                  })
+                : $t("activityRepeatCleared");
+        case "repeated":
+            return $t("activityRepeated", {
+                date: formatServerDate(d.dueDate, {
+                    day: "2-digit",
+                    month: "2-digit",
+                    year: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                }),
+            });
         case "archived":
             return $t("activityArchived");
         case "restored":

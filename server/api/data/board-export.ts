@@ -8,8 +8,10 @@ import {
   downloadDisposition,
   exportDate,
 } from "../../utils/boardExport";
+import { boardCsv } from "../../utils/cardsCsv";
 
-// One board, as a zip: its JSON and the files its cards hold.
+// One board, as a zip: its JSON and the files its cards hold. Or, with
+// `?format=csv`, its cards as a spreadsheet.
 //
 // Anybody who can see a board can take it with them. Every card, comment and
 // attachment in here is something they could already open one at a time; this
@@ -51,6 +53,25 @@ export default defineEventHandler(async (event) => {
 
     const now = new Date();
     const folder = boardFolder(board);
+
+    // The same board as a spreadsheet: its cards, one per row, for somebody
+    // who reports on the work rather than moves it somewhere else.
+    if (getQuery(event).format === "csv") {
+      const config = useRuntimeConfig();
+      const csv = await boardCsv(db, board.id, {
+        language: config.language,
+        baseUrl: config.boardsUrl,
+      });
+      setHeader(event, "content-type", "text/csv; charset=utf-8");
+      setHeader(
+        event,
+        "content-disposition",
+        downloadDisposition(`${folder}-${exportDate(now)}.csv`),
+      );
+      setHeader(event, "cache-control", "no-store");
+      return csv;
+    }
+
     // Built before anything is sent, so a failure is still an error response
     // rather than a download that stops halfway.
     const built = await buildBoardExport(db, board.id, {

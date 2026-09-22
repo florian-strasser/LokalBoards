@@ -107,6 +107,9 @@ const clipboard = () => page.evaluate(() => navigator.clipboard.readText());
 console.log("\n1. a code block in a card description");
 await page.goto(`${APP}/board/${board.insertId}?card=${card.insertId}`, { waitUntil: "load" });
 await page.waitForSelector(".wysiwyg-wrapper pre", { timeout: 15000 });
+// The buttons are added once the page is running, a moment after the block
+// itself is on screen; counting straight away raced them.
+await page.waitForSelector(".wysiwyg-wrapper pre .code-copy", { timeout: 5000 }).catch(() => {});
 const buttons = page.locator(".wysiwyg-wrapper pre .code-copy");
 check("the block has a copy button", (await buttons.count()) >= 1, `${await buttons.count()} found`);
 await buttons.first().click({ force: true });

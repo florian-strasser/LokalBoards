@@ -10,7 +10,7 @@ Boards are live for everyone on them: a card someone moves, a comment someone
 writes and a box someone ticks all appear immediately for anybody else looking,
 over an internal Socket.IO connection. It also ships an
 [MCP server](/docs/mcp-server), so an assistant can work a board through an API
-key you issue and can revoke.
+key you issue or a connection you approve, and can revoke either.
 
 The interface is available in ten languages: English, German, French, Spanish,
 Italian, Dutch, Polish, Ukrainian, Portuguese and Czech. Pick one with
@@ -115,6 +115,10 @@ NUXT_EMAIL_PORT=465
 NUXT_EMAIL_SECURE=true
 NUXT_EMAIL_USER=contact@example.com
 NUXT_EMAIL_PASS=...
+
+# Optional: lets an import of a private Trello board bring its files along
+# (see "Bringing boards over" in the boards guide)
+NUXT_PUBLIC_TRELLO_API_KEY=
 ```
 
 The colours are configurable too — see [Adjust Colors](/docs/adjust-colors).

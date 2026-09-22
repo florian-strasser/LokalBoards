@@ -34,12 +34,18 @@ async function insertCard(
   id: number,
   area: number,
   dueDate: Date,
-  assignee: string | null,
+  assignees: string[] = [],
 ) {
   await db().execute(
-    "INSERT INTO cards (id, area, name, dueDate, assignee) VALUES (?,?,?,?,?)",
-    [id, area, "Task", dueDate, assignee],
+    "INSERT INTO cards (id, area, name, dueDate) VALUES (?,?,?,?)",
+    [id, area, "Task", dueDate],
   );
+  for (const user of assignees) {
+    await db().execute(
+      "INSERT INTO card_assignees (card, user) VALUES (?,?)",
+      [id, user],
+    );
+  }
 }
 async function addReminder(card: number, minutesBefore: number) {
   await db().execute(
@@ -63,7 +69,7 @@ describe("runDueReminders (integration, real MySQL)", () => {
     await invite(1, "bob");
     await insertArea(1, 1);
     // Due in 10 min, reminder 30 min before → fire time already passed.
-    await insertCard(1, 1, new Date(Date.now() + 10 * MIN), null);
+    await insertCard(1, 1, new Date(Date.now() + 10 * MIN));
     await addReminder(1, 30);
 
     expect(await runDueReminders(db())).toBe(1);
@@ -81,11 +87,27 @@ describe("runDueReminders (integration, real MySQL)", () => {
     await insertBoard(1, "owner");
     await invite(1, "bob");
     await insertArea(1, 1);
-    await insertCard(1, 1, new Date(Date.now() + 10 * MIN), "carol");
+    await insertCard(1, 1, new Date(Date.now() + 10 * MIN), ["carol"]);
     await addReminder(1, 30);
 
     await runDueReminders(db());
     expect(await dueRecipients(1)).toEqual(["carol"]);
+  });
+
+  it("notifies everyone on a card that is on several people, and nobody else", async () => {
+    await insertUser("owner");
+    await insertUser("bob");
+    await insertUser("carol");
+    await insertUser("dave");
+    await insertBoard(1, "owner");
+    await invite(1, "bob");
+    await invite(1, "dave");
+    await insertArea(1, 1);
+    await insertCard(1, 1, new Date(Date.now() + 10 * MIN), ["carol", "bob"]);
+    await addReminder(1, 30);
+
+    await runDueReminders(db());
+    expect(await dueRecipients(1)).toEqual(["bob", "carol"]);
   });
 
   it("does not fire a reminder whose time hasn't arrived yet", async () => {
@@ -93,7 +115,7 @@ describe("runDueReminders (integration, real MySQL)", () => {
     await insertBoard(1, "owner");
     await insertArea(1, 1);
     // Due in 2 days; a 30-min-before reminder fires only ~2 days from now.
-    await insertCard(1, 1, new Date(Date.now() + 2 * DAY), null);
+    await insertCard(1, 1, new Date(Date.now() + 2 * DAY));
     await addReminder(1, 30);
 
     expect(await runDueReminders(db())).toBe(0);

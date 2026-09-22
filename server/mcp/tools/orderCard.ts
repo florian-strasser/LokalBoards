@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { defineMcpTool } from "@nuxtjs/mcp-toolkit/server";
 import { setupDatabase } from "../../../app/lib/databaseSetup";
+import { attachAssignees } from "../../utils/cardAssignees";
 import { getServerSocket } from "../../utils/socket";
 import {
   requireUserId,
@@ -92,6 +93,7 @@ export default defineMcpTool({
       }
     }
 
-    return jsonResult({ cards: rows.map(serializeCard) });
+    const cards = await attachAssignees(db, rows);
+    return jsonResult({ cards: cards.map(serializeCard) });
   },
 });

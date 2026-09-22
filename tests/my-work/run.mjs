@@ -93,9 +93,14 @@ try {
   };
   const area = async (boardId, name, sort = 0, archivedAt = null) =>
     (await c.execute("INSERT INTO areas (board, name, sort, archivedAt) VALUES (?,?,?,?)", [boardId, name, sort, archivedAt]))[0].insertId;
-  const card = async (areaId, name, fields = {}) =>
-    (await c.execute("INSERT INTO cards (area, name, content, sort, status, dueDate, assignee, archivedAt) VALUES (?,?,?,?,?,?,?,?)",
-      [areaId, name, fields.content ?? "", fields.sort ?? 0, fields.status ?? 0, fields.dueDate ?? null, fields.assignee ?? null, fields.archivedAt ?? null]))[0].insertId;
+  const card = async (areaId, name, fields = {}) => {
+    const id = (await c.execute("INSERT INTO cards (area, name, content, sort, status, dueDate, archivedAt) VALUES (?,?,?,?,?,?,?)",
+      [areaId, name, fields.content ?? "", fields.sort ?? 0, fields.status ?? 0, fields.dueDate ?? null, fields.archivedAt ?? null]))[0].insertId;
+    for (const user of [fields.assignee, ...(fields.assignees ?? [])].filter(Boolean)) {
+      await c.execute("INSERT INTO card_assignees (card, user) VALUES (?,?)", [id, user]);
+    }
+    return id;
+  };
 
   // Mine, shared with Anna.
   const website = await board("Website", me);

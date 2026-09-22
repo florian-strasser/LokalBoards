@@ -3,6 +3,7 @@ import { setupDatabase } from "../../../app/lib/databaseSetup";
 import { dispatchWebhooks } from "../../utils/webhooks";
 import { getServerSocket } from "../../utils/socket";
 import { putCardAfter } from "../../utils/cardPositions";
+import { attachAssignees, copyCardAssignees } from "../../utils/cardAssignees";
 
 // An attachment is stored one of three ways, and each is duplicated on its own
 // terms:
@@ -95,11 +96,12 @@ export default defineEventHandler(async (event) => {
     }
 
     // Everything the card is, except the conversation about it: the title, the
-    // description with whatever checklist it holds, the due date, the assignee
-    // and the done state. Comments are what people said, in the order they said
-    // it, and they belong to the card they were written on.
+    // description with whatever checklist it holds, the due date and how it
+    // repeats, the assignee and the done state. Comments are what people said,
+    // in the order they said it, and they belong to the card they were written
+    // on.
     const [inserted]: any = await db.execute(
-      "INSERT INTO cards (area, name, content, status, sort, dueDate, assignee) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO cards (area, name, content, status, sort, dueDate, repeatEvery, repeatAnchor, repeatArea) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
       [
         original.area,
         original.name,
@@ -107,7 +109,9 @@ export default defineEventHandler(async (event) => {
         original.status ? 1 : 0,
         Number(original.sort),
         original.dueDate || null,
-        original.assignee || null,
+        original.repeatEvery || null,
+        original.repeatAnchor || null,
+        original.repeatArea ?? null,
       ],
     );
     const newCardId = inserted.insertId;
@@ -130,6 +134,9 @@ export default defineEventHandler(async (event) => {
         [newCardId, reminder.minutesBefore],
       );
     }
+
+    // The same people are on it.
+    await copyCardAssignees(db, Number(cardID), newCardId);
 
     // A copy of a card is a copy of what it says about itself, labels included.
     // They belong to the same board, so the ids carry over as they are.
@@ -162,10 +169,10 @@ export default defineEventHandler(async (event) => {
     // The shape the board renders a card from — the same columns and counts
     // `cards.ts` returns, so the copy can be dropped straight into the list.
     const [newRows]: any = await db.execute(
-      "SELECT c.id, c.area, c.name, c.content, c.status, c.sort, c.dueDate, c.assignee, au.name AS assigneeName, au.image AS assigneeImage, au.type AS assigneeType, (SELECT COUNT(*) FROM comments co WHERE co.card = c.id) as commentCount, (SELECT COUNT(*) FROM attachments a WHERE a.card = c.id) as attachmentCount FROM cards c LEFT JOIN user au ON au.id = c.assignee WHERE c.id = ?",
+      "SELECT c.id, c.area, c.name, c.content, c.status, c.sort, c.dueDate, c.repeatEvery, (SELECT COUNT(*) FROM comments co WHERE co.card = c.id) as commentCount, (SELECT COUNT(*) FROM attachments a WHERE a.card = c.id) as attachmentCount FROM cards c WHERE c.id = ?",
       [newCardId],
     );
-    const card = newRows[0];
+    const [card] = await attachAssignees(db, newRows);
 
     // A duplicate is a new card on the board, and everyone with access hears
     // about it the same way they hear about any other.

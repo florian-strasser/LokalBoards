@@ -70,6 +70,22 @@ describe("matchesFilter", () => {
     ).toBe(false);
   });
 
+  it("matches a card on several people for any one of them", () => {
+    const shared = card({
+      assignee: undefined,
+      assignees: [
+        { id: "u1", name: "Ada" },
+        { id: "u2", name: "Ben" },
+      ],
+    });
+    expect(matchesFilter(shared, filter({ assignees: ["u2"] }), NOW)).toBe(true);
+    expect(matchesFilter(shared, filter({ assignees: ["u3"] }), NOW)).toBe(false);
+    expect(matchesFilter(shared, filter({ assignees: [UNASSIGNED] }), NOW)).toBe(false);
+    // An empty list is nobody, whatever an older field might say.
+    const nobody = card({ assignee: "u1", assignees: [] });
+    expect(matchesFilter(nobody, filter({ assignees: [UNASSIGNED] }), NOW)).toBe(true);
+  });
+
   it("tells open from done", () => {
     expect(matchesFilter(card({ status: 1 }), filter({ done: true }), NOW)).toBe(true);
     expect(matchesFilter(card({ status: 0 }), filter({ done: true }), NOW)).toBe(false);
@@ -150,6 +166,17 @@ describe("assigneesOf", () => {
       "Unassigned",
     );
     expect(withNobody.at(-1)).toMatchObject({ id: UNASSIGNED, name: "Unassigned" });
+  });
+
+  it("offers everyone on a shared card, each once", () => {
+    const people = assigneesOf(
+      [
+        card({ assignees: [{ id: "u2", name: "Zoe" }, { id: "u1", name: "Ada" }] }),
+        card({ assignees: [{ id: "u1", name: "Ada" }] }),
+      ],
+      "Unassigned",
+    );
+    expect(people.map((p) => p.id)).toEqual(["u1", "u2"]);
   });
 
   it("offers nobody from an empty board as nothing at all", () => {

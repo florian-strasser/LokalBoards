@@ -1,6 +1,7 @@
 import { defineMcpTool } from "@nuxtjs/mcp-toolkit/server";
 import { setupDatabase } from "../../../app/lib/databaseSetup";
 import { getServerSocket } from "../../utils/socket";
+import { removeCardData } from "../../utils/cardCleanup";
 import { dispatchWebhooks } from "../../utils/webhooks";
 import {
   requireUserId,
@@ -31,9 +32,11 @@ export default defineMcpTool({
     const id = requireId(cardId, cardID, "cardId");
     const { card, board } = await requireCard(id, userId, "edit");
 
-    await db.execute("DELETE FROM comments WHERE card = ?", [id]);
-    await db.execute("DELETE FROM attachments WHERE card = ?", [id]);
-    await db.execute("DELETE FROM notifications WHERE cardId = ?", [id]);
+    // Everything that hangs off the card goes with it — its comments, files,
+    // labels, reminders, people and history — the same way the app removes a
+    // card for good. This used to take the comments, attachments and
+    // notifications only, and leave the rest behind.
+    await removeCardData(db, [id]);
     await db.execute("DELETE FROM cards WHERE id = ?", [id]);
 
     const serverSocket = getServerSocket();

@@ -98,7 +98,7 @@
         <FeatureTile
           class="lg:col-span-2"
           title="Bring your board over from Trello"
-          text="Paste a link to a public board and it is recreated here: lists, cards, descriptions, checklists, comments, attachments and what was already done. Nothing to export first."
+          text="Paste a link to a public board, or choose a private board's export file, and it is recreated here: lists, cards, descriptions, checklists, labels, due dates, comments and what was already done. Coming from Wekan or Nextcloud Deck instead? Their export files come across too."
         >
           <FeatureTrello />
         </FeatureTile>

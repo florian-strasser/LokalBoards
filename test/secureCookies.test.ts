@@ -17,6 +17,16 @@ describe("wantsSecureCookies", () => {
     expect(wantsSecureCookies({ boardsUrl: "  HTTPS://Boards.Example.com/" })).toBe(true);
   });
 
+  it("ignores the configured https address on the dev server, where it is the live one", () => {
+    const live = "https://boards.example.com";
+    expect(wantsSecureCookies({ dev: true, boardsUrl: live })).toBe(false);
+    // The request itself still counts there.
+    expect(wantsSecureCookies({ dev: true, boardsUrl: live, forwardedProto: "https" })).toBe(true);
+    expect(wantsSecureCookies({ dev: true, boardsUrl: live, encrypted: true })).toBe(true);
+    // And a real deployment is not affected.
+    expect(wantsSecureCookies({ dev: false, boardsUrl: live })).toBe(true);
+  });
+
   it("is on when the proxy in front says the browser used HTTPS", () => {
     expect(wantsSecureCookies({ boardsUrl: "http://localhost:3000", forwardedProto: "https" })).toBe(true);
     expect(wantsSecureCookies({ forwardedProto: "HTTPS" })).toBe(true);

@@ -13,7 +13,7 @@ export default defineMcpTool({
   name: "listBoardMembers",
   title: "List board members",
   description:
-    "List everyone with access to a board — the owner plus invited collaborators — with their userId, name, type ('human' or 'artificial') and role ('owner', 'edit' or 'read'). Use these userIds as the assigneeId when creating or updating cards.",
+    "List everyone with access to a board — the owner plus invited collaborators — with their userId, name, type ('human' or 'artificial') and role ('owner', 'edit' or 'read'). Use these userIds in assigneeIds when creating or updating cards.",
   annotations: { readOnlyHint: true, openWorldHint: false },
   inputSchema: { ...boardIdInput },
   inputExamples: [{ boardId: 1 }],

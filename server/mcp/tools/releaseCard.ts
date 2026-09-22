@@ -1,6 +1,8 @@
 import { defineMcpTool } from "@nuxtjs/mcp-toolkit/server";
 import { setupDatabase } from "../../../app/lib/databaseSetup";
 import { getServerSocket } from "../../utils/socket";
+import { recordCardActivity } from "../../utils/cardActivity";
+import { attachAssignees, releaseCardFor } from "../../utils/cardAssignees";
 import {
   requireUserId,
   requireWriteAccess,
@@ -16,7 +18,7 @@ export default defineMcpTool({
   name: "releaseCard",
   title: "Release a claimed card",
   description:
-    "Give up a card you claimed (clears the assignee) so someone else can pick it up. Only releases a card currently assigned to you — releasing someone else's card does nothing and returns released=false. Call this if you abandon a task without finishing it.",
+    "Give up a card you claimed (takes you off it) so someone else can pick it up. Only takes you off — anyone else on the card stays, and releasing a card you are not on does nothing and returns released=false. Call this if you abandon a task without finishing it.",
   annotations: {
     readOnlyHint: false,
     idempotentHint: true,
@@ -28,21 +30,19 @@ export default defineMcpTool({
     const userId = requireUserId();
     requireWriteAccess();
     const id = requireId(cardId, cardID, "cardId");
-    const { card, board } = await requireCard(id, userId, "edit");
+    const { board } = await requireCard(id, userId, "edit");
 
-    const wasMine = card.assignee === userId;
-    if (wasMine) {
-      await db.execute(
-        "UPDATE cards SET assignee = NULL WHERE id = ? AND assignee = ?",
-        [id, userId],
-      );
-    }
+    const wasMine = await releaseCardFor(db, id, userId);
     const [rows]: any = await db.execute("SELECT * FROM cards WHERE id = ?", [
       id,
     ]);
-    const updated = rows[0];
+    const [updated] = await attachAssignees(db, rows);
 
     if (wasMine) {
+      await recordCardActivity(id, "assigned", userId, {
+        assigneeId: userId,
+        removed: true,
+      });
       const serverSocket = getServerSocket();
       if (serverSocket) {
         serverSocket.to(`board-${board.id}`).emit("updateCard", {

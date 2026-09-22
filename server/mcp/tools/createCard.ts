@@ -3,6 +3,12 @@ import { defineMcpTool } from "@nuxtjs/mcp-toolkit/server";
 import { setupDatabase } from "../../../app/lib/databaseSetup";
 import { getServerSocket } from "../../utils/socket";
 import { nextCardSort } from "../../utils/cardPositions";
+import {
+  assigneeIdsFrom,
+  attachAssignees,
+  boardMemberIds,
+  setCardAssignees,
+} from "../../utils/cardAssignees";
 import { dispatchWebhooks } from "../../utils/webhooks";
 import {
   requireUserId,
@@ -20,7 +26,7 @@ export default defineMcpTool({
   name: "createCard",
   title: "Create a card",
   description:
-    "Create a card at the end of an area. `content` (the description) is Markdown. Optionally set done, a dueDate (ISO 8601) and an assigneeId (a board member). Collaborators are notified. Needs edit access to the board.",
+    "Create a card at the end of an area. `content` (the description) is Markdown. Optionally set done, a dueDate (ISO 8601), the people on it (assigneeIds, board members) and, with a due date, a repeat rhythm. Collaborators are notified. Needs edit access to the board.",
   annotations: { readOnlyHint: false, openWorldHint: false },
   inputSchema: {
     ...areaIdInput,
@@ -37,11 +43,23 @@ export default defineMcpTool({
       .string()
       .optional()
       .describe("Due date as ISO 8601 (e.g. 2026-08-01T09:00:00Z)."),
+    assigneeIds: z
+      .array(z.string())
+      .optional()
+      .describe(
+        "User ids of the people to put on the card — a card can be on several people. Each must be a board member (see listBoardMembers).",
+      ),
     assigneeId: z
       .string()
       .optional()
       .describe(
-        "User id to assign (must be a board member; from listBoardMembers).",
+        "One user id to put on the card; the same as assigneeIds with one entry. Ignored when assigneeIds is given.",
+      ),
+    repeat: z
+      .enum(["day", "week", "twoWeeks", "month", "year"])
+      .optional()
+      .describe(
+        "Make the card repeat: once it is marked done, the next one is created with its checklist unticked and the next due date in the series. Needs a dueDate.",
       ),
     idempotencyKey: z
       .string()
@@ -68,7 +86,9 @@ export default defineMcpTool({
     content,
     done,
     dueDate,
+    assigneeIds,
     assigneeId,
+    repeat,
     idempotencyKey,
   }) => {
     const userId = requireUserId();
@@ -83,7 +103,8 @@ export default defineMcpTool({
         [id, idempotencyKey],
       );
       if (existing[0]) {
-        return jsonResult({ card: serializeCard(existing[0]), created: false });
+        const [card] = await attachAssignees(db, existing);
+        return jsonResult({ card: serializeCard(card), created: false });
       }
     }
 
@@ -95,17 +116,22 @@ export default defineMcpTool({
       }
       due = d;
     }
-    if (assigneeId) {
-      const [[member]]: any = await db.query(
-        "SELECT 1 AS ok FROM boards WHERE id = ? AND user = ? UNION SELECT 1 AS ok FROM invitations WHERE board = ? AND user = ? LIMIT 1",
-        [board.id, assigneeId, board.id, assigneeId],
+    if (repeat && !due) {
+      throw new McpError(
+        "VALIDATION",
+        "A card needs a due date to repeat. Pass dueDate as well.",
       );
-      if (!member) {
-        throw new McpError(
-          "VALIDATION",
-          `assigneeId '${assigneeId}' is not a member of this board (see listBoardMembers).`,
-        );
-      }
+    }
+    const people = assigneeIdsFrom(
+      assigneeIds ?? (assigneeId ? [assigneeId] : []),
+    );
+    const members = await boardMemberIds(db, board.id);
+    const stranger = people.find((id) => !members.has(id));
+    if (stranger) {
+      throw new McpError(
+        "VALIDATION",
+        `'${stranger}' is not a member of this board (see listBoardMembers).`,
+      );
     }
 
     // After the highest number in the column, not after however many cards
@@ -115,7 +141,7 @@ export default defineMcpTool({
     let insertId: number;
     try {
       const [result]: any = await db.execute(
-        "INSERT INTO cards (area, name, content, status, sort, dueDate, assignee, idempotencyKey) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO cards (area, name, content, status, sort, dueDate, idempotencyKey, repeatEvery, repeatAnchor, repeatArea) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         [
           id,
           name,
@@ -123,8 +149,10 @@ export default defineMcpTool({
           done ? 1 : 0,
           sort,
           due,
-          assigneeId || null,
           idempotencyKey || null,
+          repeat || null,
+          repeat ? due : null,
+          repeat ? id : null,
         ],
       );
       insertId = result.insertId;
@@ -137,18 +165,17 @@ export default defineMcpTool({
           [id, idempotencyKey],
         );
         if (existing[0]) {
-          return jsonResult({
-            card: serializeCard(existing[0]),
-            created: false,
-          });
+          const [card] = await attachAssignees(db, existing);
+          return jsonResult({ card: serializeCard(card), created: false });
         }
       }
       throw err;
     }
+    await setCardAssignees(db, insertId, board.id, people);
     const [rows]: any = await db.execute("SELECT * FROM cards WHERE id = ?", [
       insertId,
     ]);
-    const card = rows[0];
+    const [card] = await attachAssignees(db, rows);
 
     // Notify the board owner + collaborators (except the creator).
     const [invited]: any = await db.execute(

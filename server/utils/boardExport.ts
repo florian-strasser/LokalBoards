@@ -120,7 +120,7 @@ export async function buildBoardExport(
     [boardId],
   );
   const [cards]: any = await db.execute(
-    "SELECT c.`id`, c.`area`, c.`name`, c.`content`, c.`status`, c.`sort`, c.`dueDate`, c.`assignee`, c.`archivedAt` FROM `cards` c JOIN `areas` a ON a.`id` = c.`area` WHERE a.`board` = ? ORDER BY c.`sort`, c.`id`",
+    "SELECT c.`id`, c.`area`, c.`name`, c.`content`, c.`status`, c.`sort`, c.`dueDate`, c.`repeatEvery`, c.`archivedAt` FROM `cards` c JOIN `areas` a ON a.`id` = c.`area` WHERE a.`board` = ? ORDER BY c.`sort`, c.`id`",
     [boardId],
   );
   const [labels]: any = await db.execute(
@@ -151,6 +151,16 @@ export async function buildBoardExport(
     "SELECT `user`, `permission` FROM `invitations` WHERE `board` = ? ORDER BY `id`",
     [boardId],
   );
+  const [onCards]: any = await db.execute(
+    `SELECT \`card\`, \`user\` FROM \`card_assignees\` WHERE \`card\` IN (${ON_BOARD}) ORDER BY \`id\``,
+    [boardId],
+  );
+  const assigneesByCard = new Map<number, string[]>();
+  for (const row of onCards) {
+    const list = assigneesByCard.get(Number(row.card)) ?? [];
+    list.push(String(row.user));
+    assigneesByCard.set(Number(row.card), list);
+  }
 
   // People by name rather than by id alone, so the file still says who did
   // what when it is read somewhere the accounts do not exist. No addresses: a
@@ -159,7 +169,7 @@ export async function buildBoardExport(
   for (const id of [
     board.user,
     ...invitations.map((row: any) => row.user),
-    ...cards.map((row: any) => row.assignee),
+    ...onCards.map((row: any) => row.user),
     ...comments.map((row: any) => row.user),
     ...activity.map((row: any) => row.actorId),
   ]) {
@@ -295,7 +305,13 @@ export async function buildBoardExport(
       done: !!card.status,
       sort: card.sort,
       dueDate: card.dueDate ?? null,
-      assignee: person(card.assignee),
+      repeat: card.repeatEvery ?? null,
+      // Everyone on it, in the order they were added. `assignee` is the first
+      // of them, as the API reports it for older integrations.
+      assignees: (assigneesByCard.get(Number(card.id)) ?? []).map((id) =>
+        person(id),
+      ),
+      assignee: person(assigneesByCard.get(Number(card.id))?.[0] ?? null),
       labels: labelsByCard.get(card.id) ?? [],
       archivedAt: card.archivedAt ?? null,
       reminders: remindersByCard.get(card.id) ?? [],

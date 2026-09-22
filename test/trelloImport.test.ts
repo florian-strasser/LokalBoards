@@ -195,3 +195,110 @@ describe("trelloJsonToBoard", () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// Trello's exported file, and what the import does with its links.
+
+import fs from "node:fs";
+import { isTrelloExport, trelloToImport } from "../server/utils/trelloImport";
+import { isWekanExport } from "../server/utils/wekanImport";
+import { isDeckExport } from "../server/utils/deckImport";
+import { isTrelloAttachmentUrl } from "../server/utils/trelloDownload";
+import { filesAsLinks } from "../server/utils/boardImport";
+
+const fixture = (name: string) =>
+  JSON.parse(fs.readFileSync(new URL(`./fixtures/import/${name}`, import.meta.url), "utf8"));
+
+// The fields Trello's export has at the top — the same as a public board's JSON.
+const trelloBoard = {
+  id: "5f0000000000000000000001",
+  name: "Launch",
+  shortLink: "AbCd1234",
+  lists: [{ id: "l1", name: "To do", pos: 1, closed: false }],
+  cards: [
+    {
+      id: "c1",
+      idList: "l1",
+      name: "Pick a date",
+      desc: "",
+      pos: 1,
+      closed: false,
+      due: "2026-10-01T10:00:00.000Z",
+      dueComplete: false,
+      labels: [
+        { id: "a", name: "Marketing", color: "green" },
+        { id: "b", name: "", color: "red" },
+      ],
+      attachments: [
+        {
+          id: "f1",
+          name: "plan.pdf",
+          isUpload: true,
+          mimeType: "application/pdf",
+          bytes: 1200,
+          url: "https://trello.com/1/cards/c1/attachments/f1/download/plan.pdf",
+        },
+      ],
+    },
+  ],
+  checklists: [],
+  actions: [],
+  members: [],
+};
+
+describe("isTrelloExport", () => {
+  it("recognises Trello's board export, and tells it from Wekan's and Deck's", () => {
+    expect(isTrelloExport(trelloBoard)).toBe(true);
+    expect(isTrelloExport(fixture("wekan-board.json"))).toBe(false);
+    expect(isTrelloExport(fixture("deck-export.json"))).toBe(false);
+    expect(isWekanExport(trelloBoard)).toBe(false);
+    expect(isDeckExport(trelloBoard)).toBe(false);
+  });
+});
+
+describe("trelloToImport", () => {
+  const card = trelloToImport(trelloBoard)!.areas[0].cards[0];
+
+  it("brings the labels, a colour-only one by its colour, and the due date", () => {
+    expect(card.labels).toEqual(["Marketing", "red"]);
+    expect(card.dueDate).toBe("2026-10-01T10:00:00.000Z");
+    expect(card.done).toBe(false);
+  });
+
+  it("keeps an uploaded file as a link to fetch", () => {
+    expect(card.files).toEqual([
+      {
+        name: "plan.pdf",
+        type: "application/pdf",
+        url: "https://trello.com/1/cards/c1/attachments/f1/download/plan.pdf",
+        bytes: 1200,
+      },
+    ]);
+  });
+});
+
+describe("isTrelloAttachmentUrl", () => {
+  it("is only ever an attachment download on trello.com, over https", () => {
+    expect(isTrelloAttachmentUrl("https://trello.com/1/cards/c1/attachments/f1/download/plan.pdf")).toBe(true);
+    expect(isTrelloAttachmentUrl("http://trello.com/1/cards/c1/attachments/f1/download/plan.pdf")).toBe(false);
+    expect(isTrelloAttachmentUrl("https://trello.com.evil.example/1/cards/c1/attachments/f1/download/x")).toBe(false);
+    expect(isTrelloAttachmentUrl("https://evil.example/1/cards/c1/attachments/f1/download/x")).toBe(false);
+    expect(isTrelloAttachmentUrl("https://trello.com/b/AbCd1234.json")).toBe(false);
+    expect(isTrelloAttachmentUrl("https://user@trello.com:8443/1/cards/c1/attachments/f1/download/x")).toBe(false);
+    expect(isTrelloAttachmentUrl(null)).toBe(false);
+  });
+});
+
+describe("filesAsLinks", () => {
+  it("lists the files left behind as Markdown links, names and addresses made safe", () => {
+    expect(
+      filesAsLinks("Attachments that could not be copied", [
+        { name: "plan [v2].pdf", type: "", url: "https://trello.com/1/cards/c/attachments/f/download/plan (v2).pdf" },
+        { name: "no link", type: "", data: "AA==" },
+      ]),
+    ).toBe(
+      "**Attachments that could not be copied**\n\n" +
+        "- [plan \\[v2\\].pdf](https://trello.com/1/cards/c/attachments/f/download/plan%20%28v2%29.pdf)",
+    );
+  });
+});

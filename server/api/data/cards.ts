@@ -1,5 +1,6 @@
 import { defineEventHandler, getQuery } from "h3";
 import { setupDatabase } from "../../../app/lib/databaseSetup";
+import { attachAssignees } from "../../utils/cardAssignees";
 
 export default defineEventHandler(async (event) => {
   // Check the HTTP method
@@ -48,8 +49,8 @@ export default defineEventHandler(async (event) => {
       {
         // Optional filters (also used by the MCP layer's searchCards):
         //   ?done=true|false      only completed / only open cards
-        //   ?assignee=<userId>    only cards assigned to that user
-        //   ?unassigned=true      only cards nobody has been assigned
+        //   ?assignee=<userId>    only cards that user is on
+        //   ?unassigned=true      only cards nobody is on
         //   ?dueBefore=<ISO>      only cards due before that timestamp
         // An archived card is not on the board. Neither is one whose whole
         // area was archived — the area took its cards with it without marking
@@ -66,10 +67,14 @@ export default defineEventHandler(async (event) => {
           params.push(String(query.done) === "true" ? 1 : 0);
         }
         if (String(query.unassigned) === "true") {
-          filters.push("c.assignee IS NULL");
+          filters.push(
+            "NOT EXISTS (SELECT 1 FROM card_assignees ca WHERE ca.card = c.id)",
+          );
         }
         if (query.assignee) {
-          filters.push("c.assignee = ?");
+          filters.push(
+            "EXISTS (SELECT 1 FROM card_assignees ca WHERE ca.card = c.id AND ca.user = ?)",
+          );
           params.push(String(query.assignee));
         }
         if (query.dueBefore) {
@@ -80,10 +85,11 @@ export default defineEventHandler(async (event) => {
           }
         }
 
-        const [cards] = await db.execute(
-          `SELECT c.id, c.area, c.name, c.content, c.status, c.sort, c.dueDate, c.assignee, au.name AS assigneeName, au.image AS assigneeImage, au.type AS assigneeType, (SELECT COUNT(*) FROM comments co WHERE co.card = c.id) as commentCount, (SELECT COUNT(*) FROM attachments a WHERE a.card = c.id) as attachmentCount FROM cards c LEFT JOIN user au ON au.id = c.assignee WHERE ${filters.join(" AND ")} ORDER BY c.sort ASC, c.id ASC`,
+        const [rows] = await db.execute(
+          `SELECT c.id, c.area, c.name, c.content, c.status, c.sort, c.dueDate, c.repeatEvery, (SELECT COUNT(*) FROM comments co WHERE co.card = c.id) as commentCount, (SELECT COUNT(*) FROM attachments a WHERE a.card = c.id) as attachmentCount FROM cards c WHERE ${filters.join(" AND ")} ORDER BY c.sort ASC, c.id ASC`,
           params,
         );
+        const cards = await attachAssignees(db, rows);
 
         // Prefetch comments and attachment metadata for every card so the
         // card modal can render instantly without an extra round trip. The

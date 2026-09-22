@@ -110,9 +110,10 @@ try {
   fs.writeFileSync(path.join(uploads, pasted), pastedBytes);
   const tricky = `<p>O'Reilly \\ "quoted"</p>\n<p>Zeile zwei 🚀</p><img src="/api/uploads/${pasted}">`;
   const due = new Date(Date.UTC(2026, 9, 1, 14, 30, 0));
-  const [website] = await c.execute("INSERT INTO cards (area, name, content, sort, dueDate, assignee) VALUES (?,?,?,?,?,?)",
-    [todo.insertId, "Website", tricky, 0, due, member.id]);
+  const [website] = await c.execute("INSERT INTO cards (area, name, content, sort, dueDate) VALUES (?,?,?,?,?)",
+    [todo.insertId, "Website", tricky, 0, due]);
   const cardId = website.insertId;
+  await c.execute("INSERT INTO card_assignees (card, user) VALUES (?,?),(?,?)", [cardId, member.id, cardId, owner.id]);
   const [thrown] = await c.execute("INSERT INTO cards (area, name, content, sort, archivedAt) VALUES (?,?,?,?,UTC_TIMESTAMP())", [todo.insertId, "Thrown away", "", 1]);
   await c.execute("INSERT INTO cards (area, name, content, sort) VALUES (?,?,?,?)", [gone.insertId, "Inside the archived area", "", 0]);
 
@@ -185,7 +186,9 @@ try {
   const card = todoCards.find((entry) => entry.id === cardId) ?? {};
   check("a description comes through character for character", card.content === tricky);
   check("with its due date", card.dueDate === due.toISOString(), card.dueDate);
-  check("who it is assigned to", card.assignee?.name === "Member Person");
+  check("who it is on, everyone of them in order",
+    JSON.stringify(card.assignees?.map((person) => person.name)) === JSON.stringify(["Member Person", "Owner Person"]) &&
+    card.assignee?.name === "Member Person", JSON.stringify(card.assignees));
   check("its labels by name", JSON.stringify(card.labels) === JSON.stringify(["Webdesign"]));
   check("its reminders", JSON.stringify(card.reminders) === JSON.stringify([60]));
   check("its history", card.activity?.[0]?.type === "labels" && card.activity[0].actor?.name === "Owner Person" && card.activity[0].data?.added?.[0] === "Webdesign");
@@ -243,7 +246,7 @@ try {
   const [[sessions]] = await restore.query("SELECT COUNT(*) AS n FROM `session`");
   check("and no session did", sessions.n === 0);
 
-  const pick = "SELECT name, content, dueDate, assignee, archivedAt FROM cards ORDER BY id";
+  const pick = "SELECT c.name, c.content, c.dueDate, c.archivedAt, (SELECT GROUP_CONCAT(ca.user ORDER BY ca.id) FROM card_assignees ca WHERE ca.card = c.id) AS people FROM cards c ORDER BY c.id";
   const [before] = await c.query(pick);
   const [after] = await restore.query(pick);
   check("every card reads the same as before, dates and all", JSON.stringify(before) === JSON.stringify(after));

@@ -16,7 +16,7 @@ LokalBoards is currently available in the following languages: English (EN), Ger
 
 ## AI agents (MCP)
 
-LokalBoards isn't only for humans — it ships a built-in [Model Context Protocol](https://modelcontextprotocol.io) server (`/mcp`) so AI agents can read and manage boards on a user's behalf. An agent authenticates with an API key (create one under **Settings → API keys**, as **full-access** or **read-only**) and can search and filter cards, create/update/move/delete them, write comments, assign members and set due dates. Card descriptions and comments are stored as **Markdown** — the format agents work in natively — and are rendered safely.
+LokalBoards isn't only for humans — it ships a built-in [Model Context Protocol](https://modelcontextprotocol.io) server (`/mcp`) so AI agents can read and manage boards on a user's behalf. An agent authenticates with an API key (create one under **Settings → API keys**, as **full-access** or **read-only**), or — for clients that only speak OAuth, such as ChatGPT's custom connectors — by sending you to your own instance to sign in and allow it (**Settings → Connected apps**). Either way it can search and filter cards, create/update/move/delete them, write comments, assign members and set due dates. Card descriptions and comments are stored as **Markdown** — the format agents work in natively — and are rendered safely.
 
 Agents and people can share a board safely:
 

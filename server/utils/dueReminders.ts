@@ -5,7 +5,7 @@ import { getBoardMemberIds } from "./boardMembers";
 // hourly `notification` task then emails any unread ones.
 //
 // Recipients:
-//   - assigned card   → only the assignee
+//   - assigned card   → the people on it
 //   - unassigned card → the board owner + all invited users
 //
 // Takes the connection pool as a parameter so it can be tested against a real
@@ -15,7 +15,7 @@ export async function runDueReminders(db: any): Promise<number> {
   // doesn't spam long-overdue reminders.
   const [rows]: any = await db.execute(
     `SELECT r.id AS reminderId, c.id AS cardId, c.name AS cardName,
-            c.dueDate AS dueDate, c.assignee AS assignee, a.board AS boardId
+            c.dueDate AS dueDate, a.board AS boardId
        FROM card_reminders r
        JOIN cards c ON c.id = r.card
        JOIN areas a ON a.id = c.area
@@ -33,8 +33,12 @@ export async function runDueReminders(db: any): Promise<number> {
   );
 
   for (const r of rows as any[]) {
-    const recipients = r.assignee
-      ? [r.assignee]
+    const [onIt]: any = await db.execute(
+      "SELECT user FROM card_assignees WHERE card = ? ORDER BY id ASC",
+      [r.cardId],
+    );
+    const recipients = onIt.length
+      ? onIt.map((row: any) => String(row.user))
       : await getBoardMemberIds(db, r.boardId);
 
     // Store the due date as ISO so the notification translators (UI + email)

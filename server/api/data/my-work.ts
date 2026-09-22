@@ -1,8 +1,11 @@
-import { defineEventHandler, getQuery } from "h3";
+import { defineEventHandler, getQuery, setHeader } from "h3";
 import { setupDatabase } from "../../../app/lib/databaseSetup";
 import { checklistProgress } from "../../../app/utils/checklistProgress";
+import { downloadDisposition, exportDate } from "../../utils/boardExport";
+import { cardsToCsv } from "../../utils/cardsCsv";
 
-// The open cards assigned to the caller, across every board they can still see.
+// The open cards the caller is on, across every board they can still see — on
+// their own or with others.
 //
 // Only what is on you and not done: a card ticked off is finished business, and
 // one on a board you have left, or that was archived with its area or its
@@ -11,6 +14,8 @@ import { checklistProgress } from "../../../app/utils/checklistProgress";
 //
 // The grouping into overdue, this week and later happens in the browser, which
 // knows what "today" is for the person looking.
+//
+// `?format=csv` sends the same list as a spreadsheet to download.
 //
 // `?count=1` answers only how many there are. The dashboard asks that on every
 // visit to decide whether My work is offered at all, and it should not have to
@@ -24,7 +29,7 @@ const OPEN_WORK = `
          FROM \`cards\` c
          JOIN \`areas\` a ON a.\`id\` = c.\`area\`
          JOIN \`boards\` b ON b.\`id\` = a.\`board\`
-        WHERE c.\`assignee\` = ?
+        WHERE EXISTS (SELECT 1 FROM \`card_assignees\` ca WHERE ca.\`card\` = c.\`id\` AND ca.\`user\` = ?)
           AND (c.\`status\` = 0 OR c.\`status\` IS NULL)
           AND c.\`archivedAt\` IS NULL
           AND a.\`archivedAt\` IS NULL
@@ -52,6 +57,34 @@ export default defineEventHandler(async (event) => {
         [userId, userId, userId],
       );
       return { count: Number(counted[0]?.count ?? 0) };
+    }
+
+    // The same list as a spreadsheet, with the board each card is on.
+    if (getQuery(event).format === "csv") {
+      const [cards]: any = await db.execute(
+        `SELECT c.\`id\`, c.\`name\`, c.\`content\`, c.\`status\`, c.\`dueDate\`, c.\`repeatEvery\`,
+                a.\`name\` AS areaName, b.\`id\` AS boardId, b.\`name\` AS boardName,
+                (SELECT COUNT(*) FROM \`comments\` co WHERE co.\`card\` = c.\`id\`) AS commentCount,
+                (SELECT COUNT(*) FROM \`attachments\` att WHERE att.\`card\` = c.\`id\`) AS attachmentCount
+         ${OPEN_WORK}
+          ORDER BY c.\`dueDate\` IS NULL, c.\`dueDate\`, b.\`name\`, a.\`sort\`, c.\`sort\`, c.\`id\`
+          LIMIT ${LIMIT}`,
+        [userId, userId, userId],
+      );
+      const config = useRuntimeConfig();
+      const csv = await cardsToCsv(db, cards, {
+        language: config.language,
+        baseUrl: config.boardsUrl,
+        withBoard: true,
+      });
+      setHeader(event, "content-type", "text/csv; charset=utf-8");
+      setHeader(
+        event,
+        "content-disposition",
+        downloadDisposition(`my-work-${exportDate(new Date())}.csv`),
+      );
+      setHeader(event, "cache-control", "no-store");
+      return csv;
     }
 
     const [rows]: any = await db.execute(

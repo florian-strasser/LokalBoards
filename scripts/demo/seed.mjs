@@ -114,19 +114,18 @@ const richDesc =
   "- [ ] First round of concepts\n" +
   "- [ ] Team review";
 
-// --- Cards ---  [id, area, name, sort, content, status, dueDate, assignee]
+// --- Cards ---  [id, area, name, sort, content, status, dueDate, who]
+// `who` is one person, a list of them for a card on several, or null.
 // Alex, whose account the screenshots use, has open work on every board they
 // are on and not only the hero board, so My work shows a card in each group:
 // overdue on Website Relaunch, this week on Personal Tasks and Product Roadmap,
 // later on Marketing Ideas. All dated, so no tile grows a row for an avatar.
-await db.query(
-  "INSERT INTO `cards` (id,area,name,sort,content,status,dueDate,assignee) VALUES ?",
-  [[
+const cardRows = [
     // Board 1 carries a full workload rather than a token card or two: it is
     // the board in the homepage hero, and a nearly empty one there would say
     // the wrong thing about what this is for.
     [1,1,"Competitor research",0,"Analyse the top five competitors and summarise their pricing.",0,null,null],
-    [2,1,"Redesign the logo",1,richDesc,0,days(5),"u-ben"],
+    [2,1,"Redesign the logo",1,richDesc,0,days(5),["u-ben","u-carol"]],
     [3,1,"Draft the pricing page",2,"Three tiers: Free, Pro, Team.",0,days(9),null],
     [14,1,"Write the launch announcement",3,"Blog post and the mail to existing customers.",0,null,null],
     [15,1,"Audit the onboarding e-mails",4,"- [x] Welcome\n- [ ] Password reset\n- [ ] Invitation",0,days(6),"u-carol"],
@@ -162,8 +161,15 @@ await db.query(
     [33,7,"Dark-mode logo variant",0,"",0,null,null],
     [34,7,"Sticker sheet for the meetup",1,"",0,null,null],
     [35,1,"Old pricing experiment",10,"Superseded by the three-tier plan.",0,null,null],
-  ]],
+];
+await db.query(
+  "INSERT INTO `cards` (id,area,name,sort,content,status,dueDate) VALUES ?",
+  [cardRows.map((row) => row.slice(0, 7))],
 );
+const onCards = cardRows.flatMap(([id, , , , , , , who]) =>
+  (Array.isArray(who) ? who : who ? [who] : []).map((user) => [id, user]),
+);
+await db.query("INSERT INTO `card_assignees` (card,user) VALUES ?", [onCards]);
 
 // --- Archived work on board 1 ---
 // Neither is drawn on the board or counted in its headers, so the hero is

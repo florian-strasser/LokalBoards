@@ -1,3 +1,5 @@
+import type { ImportBoard } from "./boardImport";
+
 // Pure helpers for the Trello board import (server/api/data/import/trello.ts).
 // Kept here — free of DB/HTTP — so the parsing can be unit-tested in isolation.
 // Card descriptions and comments are stored as Markdown, and Trello's own
@@ -79,6 +81,8 @@ export interface ImportedBoard {
       name: string;
       content: string;
       status: number;
+      labels: string[];
+      dueDate: string | null;
       comments: ImportedComment[];
       attachments: ImportedAttachment[];
     }>;
@@ -212,6 +216,14 @@ export function trelloJsonToBoard(trello: any): ImportedBoard | null {
         name: String(card.name || "").slice(0, NAME_MAX) || "—",
         content,
         status,
+        // A Trello label without a name is a colour, and the colour is the
+        // word Trello shows for it.
+        labels: (card.labels || [])
+          .map((label: any) =>
+            String(label?.name || "").trim() || String(label?.color || ""),
+          )
+          .filter(Boolean),
+        dueDate: typeof card.due === "string" ? card.due : null,
         comments,
         attachments,
       };
@@ -220,4 +232,51 @@ export function trelloJsonToBoard(trello: any): ImportedBoard | null {
   });
 
   return { name: name.slice(0, NAME_MAX), areas };
+}
+
+// ---------------------------------------------------------------------------
+// The same board, from a file.
+//
+// Trello's own export — the board menu's Print, export and share → Export as
+// JSON — is the very JSON a public board serves at `trello.com/b/<id>.json`,
+// which is what the link import reads. So a file needs no parser of its own,
+// only recognising: it is a board with a `shortLink`, its lists, cards and
+// action feed, and none of the markers the Wekan and Deck exports carry.
+export function isTrelloExport(json: any): boolean {
+  return (
+    !!json &&
+    typeof json === "object" &&
+    typeof json.shortLink === "string" &&
+    Array.isArray(json.lists) &&
+    Array.isArray(json.cards) &&
+    Array.isArray(json.actions) &&
+    json._format === undefined
+  );
+}
+
+/** A Trello board in the shape `boardImport.ts` writes; its uploaded files are
+ *  links to Trello, fetched while the board is written. */
+export function trelloToImport(trello: any): ImportBoard | null {
+  const board = trelloJsonToBoard(trello);
+  if (!board) return null;
+  return {
+    name: board.name,
+    areas: board.areas.map((area) => ({
+      name: area.name,
+      cards: area.cards.map((card) => ({
+        name: card.name,
+        content: card.content,
+        done: card.status === 1,
+        dueDate: card.dueDate,
+        labels: card.labels,
+        comments: card.comments,
+        files: card.attachments.map((file) => ({
+          name: file.name,
+          type: file.mimeType,
+          url: file.url,
+          bytes: file.bytes,
+        })),
+      })),
+    })),
+  };
 }

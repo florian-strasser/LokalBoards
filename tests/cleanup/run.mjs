@@ -1,6 +1,11 @@
-// Deleting a card, an area or a board takes everything belonging to it — the
-// attachment rows, the uploaded files, the comments, the reminders and the
-// activity — and the migration clears what earlier versions left behind.
+// Deleting a card, an area or a board for good takes everything belonging to
+// it — the attachment rows, the uploaded files, the comments, the reminders,
+// the people on it and the activity — and the migration clears what earlier
+// versions left behind.
+//
+// "For good": a plain delete archives, and an archived card keeps all of this
+// so that it can come back. Deleting permanently, as the archive dialog does,
+// is what has to leave nothing behind.
 //
 // The files are the part worth checking on disk rather than in the database: a
 // row that survives is visible in a query, a file that survives is invisible
@@ -31,7 +36,7 @@ const sweep = async () => {
   for (const r of rows) { try { fs.unlinkSync(path.join(UPLOADS, String(r.filedata).split("/").pop())); } catch {} }
   await c.execute("DELETE FROM attachments WHERE filedata LIKE '/api/uploads/leak-%'");
   const scope = "IN (SELECT c.id FROM cards c JOIN areas a ON c.area = a.id JOIN boards b ON a.board = b.id WHERE b.name LIKE 'Leak %')";
-  for (const t of ["attachments", "comments", "card_reminders", "card_activity"]) await c.execute(`DELETE FROM \`${t}\` WHERE card ${scope}`);
+  for (const t of ["attachments", "comments", "card_reminders", "card_activity", "card_assignees"]) await c.execute(`DELETE FROM \`${t}\` WHERE card ${scope}`);
   await c.execute("DELETE FROM cards WHERE area IN (SELECT id FROM areas WHERE board IN (SELECT id FROM boards WHERE name LIKE 'Leak %'))");
   await c.execute("DELETE FROM areas WHERE board IN (SELECT id FROM boards WHERE name LIKE 'Leak %')");
   await c.execute("DELETE FROM notifications WHERE boardId IN (SELECT id FROM boards WHERE name LIKE 'Leak %')");
@@ -55,12 +60,13 @@ const seedCard = async (c, areaId, label) => {
   await c.execute("INSERT INTO `comments` (`card`, `user`, `content`) VALUES (?, NULL, 'a comment')", [card.insertId]);
   await c.execute("INSERT INTO `card_reminders` (`card`, `minutesBefore`) VALUES (?, 30)", [card.insertId]);
   await c.execute("INSERT INTO `card_activity` (`card`, `type`) VALUES (?, 'created')", [card.insertId]).catch(() => {});
+  await c.execute("INSERT INTO `card_assignees` (`card`, `user`) SELECT ?, `id` FROM `user` WHERE email LIKE '%@example.test' LIMIT 1", [card.insertId]);
   return { cardId: card.insertId, file: name };
 };
 
 const leftovers = async (c, cardId) => {
   const counts = {};
-  for (const t of ["attachments", "comments", "card_reminders", "card_activity"]) {
+  for (const t of ["attachments", "comments", "card_reminders", "card_activity", "card_assignees"]) {
     const [[row]] = await c.execute(`SELECT COUNT(*) n FROM \`${t}\` WHERE card = ?`, [cardId]);
     counts[t] = row.n;
   }
@@ -102,7 +108,7 @@ console.log("\n1. deleting a card takes its attachments, files and the rest");
   const [area] = await c.execute("INSERT INTO `areas` (`name`, `board`, `sort`) VALUES ('Todo', ?, 1)", [board.insertId]);
   const seeded = await seedCard(c, area.insertId, "Card to delete");
   check("the file exists to begin with", fs.existsSync(path.join(UPLOADS, seeded.file)));
-  const res = await api("/api/data/card", { method: "DELETE", body: JSON.stringify({ cardID: seeded.cardId }) });
+  const res = await api("/api/data/card", { method: "DELETE", body: JSON.stringify({ cardID: seeded.cardId, permanent: true }) });
   check("the card was deleted", res.status === 200, `status ${res.status}`);
   const after = await leftovers(c, seeded.cardId);
   check("no rows left behind", Object.values(after).every((n) => n === 0), JSON.stringify(after));
@@ -115,7 +121,7 @@ console.log("\n2. deleting an area takes everything in it");
   const [area] = await c.execute("INSERT INTO `areas` (`name`, `board`, `sort`) VALUES ('Todo', ?, 1)", [board.insertId]);
   const a = await seedCard(c, area.insertId, "One");
   const b = await seedCard(c, area.insertId, "Two");
-  const res = await api(`/api/data/area?id=${area.insertId}&boardId=${board.insertId}`, { method: "DELETE" });
+  const res = await api(`/api/data/area?id=${area.insertId}&boardId=${board.insertId}&permanent=true`, { method: "DELETE" });
   check("the area was deleted", res.status === 200, `status ${res.status}`);
   const rows = { ...(await leftovers(c, a.cardId)), ...(await leftovers(c, b.cardId)) };
   check("no rows left behind", Object.values(rows).every((n) => n === 0), JSON.stringify(rows));
@@ -127,7 +133,7 @@ console.log("\n3. deleting a board takes every card on it");
   const [board] = await c.execute("INSERT INTO `boards` (`name`, `user`) VALUES ('Leak Board', ?)", [owner.id]);
   const [area] = await c.execute("INSERT INTO `areas` (`name`, `board`, `sort`) VALUES ('Todo', ?, 1)", [board.insertId]);
   const a = await seedCard(c, area.insertId, "One");
-  const res = await api(`/api/data/board?id=${board.insertId}&userId=${owner.id}`, { method: "DELETE" });
+  const res = await api(`/api/data/board?id=${board.insertId}&userId=${owner.id}&permanent=true`, { method: "DELETE" });
   check("the board was deleted", res.status === 200, `status ${res.status}`);
   check("no rows left behind", Object.values(await leftovers(c, a.cardId)).every((n) => n === 0));
   check("the file is gone", !fs.existsSync(path.join(UPLOADS, a.file)));
@@ -143,7 +149,7 @@ console.log("\n4. a file two attachments share is not taken from under the other
   // copied files might have.
   await c.execute("INSERT INTO `attachments` (`card`, `filename`, `filetype`, `filesize`, `filedata`) VALUES (?, 'f.txt', 'text/plain', 9, ?)",
     [goer.insertId, `/api/uploads/${keeper.file}`]);
-  const res = await api("/api/data/card", { method: "DELETE", body: JSON.stringify({ cardID: goer.insertId }) });
+  const res = await api("/api/data/card", { method: "DELETE", body: JSON.stringify({ cardID: goer.insertId, permanent: true }) });
   check("the second card was deleted", res.status === 200, `status ${res.status}`);
   check("the shared file is still there", fs.existsSync(path.join(UPLOADS, keeper.file)));
   const [[still]] = await c.execute("SELECT COUNT(*) n FROM attachments WHERE card = ?", [keeper.cardId]);

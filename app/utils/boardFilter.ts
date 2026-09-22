@@ -10,7 +10,7 @@ export interface BoardFilter {
   // Card wears at least one of these labels. Picking a second label widens the
   // answer rather than narrowing it, which is what a set of tags should do.
   labels: number[];
-  // Card is assigned to one of these people. `UNASSIGNED` stands for nobody.
+  // One of these people is on the card. `UNASSIGNED` stands for nobody.
   assignees: string[];
   // One of "overdue" | "today" | "week" | "none", or null for any.
   due: string | null;
@@ -39,6 +39,24 @@ export function isFiltering(filter: BoardFilter): boolean {
 
 const DAY = 86400000;
 
+/**
+ * The people on a card. A card can be on several; one saved or sent before
+ * that carries a single `assignee`, which is read as a list of one.
+ */
+export function peopleOn(card: any): any[] {
+  if (Array.isArray(card?.assignees)) return card.assignees;
+  return card?.assignee
+    ? [
+        {
+          id: card.assignee,
+          name: card.assigneeName ?? null,
+          image: card.assigneeImage ?? null,
+          type: card.assigneeType ?? null,
+        },
+      ]
+    : [];
+}
+
 const startOfDay = (date: Date) =>
   new Date(date.getFullYear(), date.getMonth(), date.getDate());
 
@@ -61,9 +79,12 @@ export function matchesFilter(
     if (!filter.labels.some((id) => worn.has(id))) return false;
   }
 
+  // A card on Ada and Ben is Ada's card and Ben's card, so either of them
+  // picked in the filter shows it.
   if (filter.assignees.length > 0) {
-    const assignee = card.assignee || UNASSIGNED;
-    if (!filter.assignees.includes(assignee)) return false;
+    const on = peopleOn(card).map((person) => person.id);
+    if (!on.length) on.push(UNASSIGNED);
+    if (!filter.assignees.some((id) => on.includes(id))) return false;
   }
 
   if (filter.done !== null && !!card.status !== filter.done) return false;
@@ -100,15 +121,17 @@ export function assigneesOf(cards: any[], unassignedLabel: string): any[] {
   let anyUnassigned = false;
 
   for (const card of cards) {
-    if (!card.assignee) {
+    const on = peopleOn(card);
+    if (!on.length) {
       anyUnassigned = true;
       continue;
     }
-    if (!people.has(card.assignee)) {
-      people.set(card.assignee, {
-        id: card.assignee,
-        name: card.assigneeName || card.assignee,
-        image: card.assigneeImage || null,
+    for (const person of on) {
+      if (people.has(person.id)) continue;
+      people.set(person.id, {
+        id: person.id,
+        name: person.name || person.id,
+        image: person.image || null,
       });
     }
   }

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { defineMcpTool } from "@nuxtjs/mcp-toolkit/server";
 import { setupDatabase } from "../../../app/lib/databaseSetup";
+import { attachAssignees } from "../../utils/cardAssignees";
 import {
   requireUserId,
   requireBoard,
@@ -13,7 +14,7 @@ export default defineMcpTool({
   name: "searchCards",
   title: "Search / filter cards",
   description:
-    "Find cards across every board the user can access, by text and/or filters. All arguments are optional and combine with AND. Omit `query` to filter only — e.g. `{ areaId, done: false, unassigned: true }` is the standard way to find work to pick up. Each result carries its boardId, boardName, areaId and areaName plus the current assignee, so you know where it lives and whether anyone holds it.",
+    "Find cards across every board the user can access, by text and/or filters. All arguments are optional and combine with AND. Omit `query` to filter only — e.g. `{ areaId, done: false, unassigned: true }` is the standard way to find work to pick up. Each result carries its boardId, boardName, areaId and areaName plus everyone on it (assignees), so you know where it lives and whether anyone holds it.",
   annotations: { readOnlyHint: true, openWorldHint: false },
   inputSchema: {
     query: z
@@ -42,12 +43,12 @@ export default defineMcpTool({
       .string()
       .optional()
       .describe(
-        "Only cards assigned to this user id (use whoami's userId for your own).",
+        "Only cards this user id is on, alone or with others (use whoami's userId for your own).",
       ),
     unassigned: z
       .boolean()
       .optional()
-      .describe("true = only cards nobody has claimed/been assigned."),
+      .describe("true = only cards nobody is on (nobody has claimed or been assigned)."),
     dueBefore: z
       .string()
       .optional()
@@ -112,9 +113,15 @@ export default defineMcpTool({
       where.push("c.status = ?");
       params.push(done ? 1 : 0);
     }
-    if (unassigned) where.push("c.assignee IS NULL");
+    if (unassigned) {
+      where.push(
+        "NOT EXISTS (SELECT 1 FROM card_assignees ca WHERE ca.card = c.id)",
+      );
+    }
     if (assigneeId) {
-      where.push("c.assignee = ?");
+      where.push(
+        "EXISTS (SELECT 1 FROM card_assignees ca WHERE ca.card = c.id AND ca.user = ?)",
+      );
       params.push(assigneeId);
     }
     if (dueBefore) {
@@ -125,20 +132,19 @@ export default defineMcpTool({
       }
     }
 
-    const [rows]: any = await db.execute(
-      `SELECT c.*, b.id AS boardId, b.name AS boardName, ar.name AS areaName,
-              u.name AS assigneeName, u.type AS assigneeType
+    const [found]: any = await db.execute(
+      `SELECT c.*, b.id AS boardId, b.name AS boardName, ar.name AS areaName
        FROM cards c
        JOIN areas ar ON ar.id = c.area
        JOIN boards b ON b.id = ar.board
        LEFT JOIN invitations inv ON inv.board = b.id AND inv.user = ?
-       LEFT JOIN \`user\` u ON u.id = c.assignee
        WHERE ${where.join(" AND ")}
        ORDER BY c.sort ASC, c.id ASC
        LIMIT ${max}`,
       // the invitations join takes the first userId, then the WHERE params
       [userId, ...params],
     );
+    const rows = await attachAssignees(db, found);
 
     // The labels each hit wears, so a caller that searched by one can see it,
     // and one that did not still knows what the card says about itself.
@@ -164,8 +170,15 @@ export default defineMcpTool({
         boardId: row.boardId,
         boardName: row.boardName,
         areaName: row.areaName,
+        // The first person on it, by name — the older field. Everyone on it
+        // is in `assignees`.
         assigneeName: row.assigneeName ?? null,
         assigneeType: row.assigneeType ?? null,
+        assignees: row.assignees.map((person: any) => ({
+          userId: person.id,
+          name: person.name ?? null,
+          type: person.type ?? "human",
+        })),
         labels: labelsByCard.get(row.id) || [],
       })),
     });

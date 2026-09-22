@@ -11,12 +11,21 @@ import { getRequestHeader } from "h3";
 //   - the connection itself is TLS
 //   - SSL=true, for a setup that can say none of the above
 //
+// Except on the dev server (`npm run dev`), which is reached over plain
+// http://localhost however its .env says the live instance is reached. There
+// the configured address says nothing about this request, and taking it at its
+// word made the session cookie Secure, which Safari then refused on localhost:
+// signing in to the dev server stopped working, silently, from v0.38.2 on. So
+// on the dev server only the request itself counts.
+//
 // It used to follow NODE_ENV=production, which every real deployment sets — the
 // Docker image and the Nix package both do. Over plain HTTP the session cookie
 // was then set and never kept: sign-in answered as though it had worked, and the
 // sign-in page came straight back with nothing to say why.
 
 export interface SecureCookieInput {
+  // True on the dev server, where NUXT_BOARDS_URL is the live address.
+  dev?: boolean;
   boardsUrl?: string | null;
   forwardedProto?: string | null;
   encrypted?: boolean;
@@ -24,7 +33,10 @@ export interface SecureCookieInput {
 }
 
 export function wantsSecureCookies(input: SecureCookieInput): boolean {
-  if (String(input.boardsUrl ?? "").trim().toLowerCase().startsWith("https://")) {
+  if (
+    !input.dev &&
+    String(input.boardsUrl ?? "").trim().toLowerCase().startsWith("https://")
+  ) {
     return true;
   }
   // Each proxy in a chain appends its own value; the first is what the browser
@@ -40,6 +52,7 @@ export function wantsSecureCookies(input: SecureCookieInput): boolean {
 
 export function secureCookiesFor(event: any): boolean {
   return wantsSecureCookies({
+    dev: import.meta.dev,
     boardsUrl: useRuntimeConfig(event).boardsUrl,
     forwardedProto: getRequestHeader(event, "x-forwarded-proto"),
     encrypted: Boolean(event?.node?.req?.socket?.encrypted),

@@ -102,6 +102,11 @@ export default defineEventHandler(async (event) => {
       // the whole page down with a 500. Their notifications and any e-mail
       // invitations they sent go the same way: nobody can act on either.
       await conn.execute("DELETE FROM `invitations` WHERE `user` = ?", [userId]);
+      // And the cards they were on: an assignment to nobody is a face on the
+      // tile that belongs to no one.
+      await conn.execute("DELETE FROM `card_assignees` WHERE `user` = ?", [
+        userId,
+      ]);
       await conn.execute(
         "DELETE FROM `notifications` WHERE `userId` = ? OR `actorId` = ?",
         [userId, userId],

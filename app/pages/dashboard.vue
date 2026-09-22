@@ -50,7 +50,7 @@
                             class="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-dark hover:bg-primary/10 hover:text-primary dark:text-white"
                         >
                             <Import class="size-4 shrink-0" />
-                            {{ $t("importFromTrello") }}
+                            {{ $t("importBoards") }}
                         </button>
                         <button
                             type="button"
@@ -59,6 +59,18 @@
                         >
                             <ArchiveRestore class="size-4 shrink-0" />
                             {{ $t("archive") }}
+                        </button>
+                        <!-- What My work is showing, as rows for a
+                             spreadsheet. Only on that view: it is an export of
+                             the list in front of you. -->
+                        <button
+                            v-if="myWork"
+                            type="button"
+                            @click="startDownload('/api/data/my-work?format=csv')"
+                            class="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-dark hover:bg-primary/10 hover:text-primary dark:text-white"
+                        >
+                            <FileSpreadsheet class="size-4 shrink-0" />
+                            {{ $t("exportSpreadsheet") }}
                         </button>
                     </ActionMenu>
                 </template>
@@ -160,11 +172,19 @@
                 </form>
             </div>
         </ModalWindow>
+        <!-- Two ways in, one dialog: Trello is read from a public board's
+             link, the others from the export file they write. Which of those
+             tools a file came from is read from the file, so choosing it is
+             all there is to do. -->
         <ModalWindow v-model="importBoard">
-            <form @submit.prevent="importTrelloBoard" class="space-y-5 text-left">
-                <h2 class="text-4xl text-dark dark:text-white">
+            <div class="space-y-8 text-left">
+            <h2 class="text-4xl text-dark dark:text-white">
+                {{ $t("importBoards") }}
+            </h2>
+            <form @submit.prevent="importTrelloBoard" class="space-y-5">
+                <h3 class="text-xl font-bold text-dark dark:text-white">
                     {{ $t("importFromTrello") }}
-                </h2>
+                </h3>
                 <p class="text-sm text-gray">{{ $t("trelloImportHint") }}</p>
                 <label class="block w-full space-y-1">
                     <span class="block text-sm"
@@ -190,11 +210,95 @@
                     class="button w-full cursor-pointer rounded-lg bg-primary px-6 py-3 text-center text-white hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-primary"
                 />
             </form>
+            <!-- A private Trello board's files are only handed to somebody
+                 signed in to Trello. The person importing is, so they can
+                 lend the import that: allow LokalBoards to read their boards
+                 for an hour, paste the token Trello shows, and the files come
+                 along. Asked only when it matters — a Trello file, of a
+                 private board, that has files. -->
+            <div v-if="pendingTrello" class="space-y-5">
+                <h3 class="text-xl font-bold text-dark dark:text-white">
+                    {{ $t("trelloFilesHeading") }}
+                </h3>
+                <p class="text-sm text-gray">{{ $t("trelloFilesHint") }}</p>
+                <a
+                    :href="trelloAuthorizeUrl"
+                    target="_blank"
+                    rel="noopener"
+                    class="button flex w-full items-center justify-center gap-2 rounded-lg bg-primary/10 px-6 py-3 text-center text-primary hover:bg-primary hover:text-white dark:bg-white/10 dark:text-white"
+                >
+                    <ExternalLink class="size-5 shrink-0" />
+                    <span>{{ $t("trelloAllowButton") }}</span>
+                </a>
+                <label class="block w-full space-y-1">
+                    <span class="block text-sm">{{
+                        $t("trelloTokenLabel")
+                    }}</span>
+                    <input
+                        v-model="trelloToken"
+                        type="text"
+                        autocomplete="off"
+                        autocorrect="off"
+                        autocapitalize="off"
+                        spellcheck="false"
+                        data-testid="trello-token"
+                        class="form-control font-mono text-sm"
+                    />
+                </label>
+                <button
+                    type="button"
+                    :disabled="importing || !trelloToken.trim()"
+                    @click="sendImportFile(pendingTrello, trelloToken.trim())"
+                    class="button w-full cursor-pointer rounded-lg bg-primary px-6 py-3 text-center text-white hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-primary"
+                >
+                    {{ importing ? $t("importing") : $t("trelloImportWithFiles") }}
+                </button>
+                <button
+                    type="button"
+                    :disabled="importing"
+                    @click="sendImportFile(pendingTrello, '')"
+                    class="w-full text-center text-sm text-primary hover:text-primary-hover disabled:opacity-50"
+                >
+                    {{ $t("trelloImportWithoutFiles") }}
+                </button>
+            </div>
+            <div v-else class="space-y-5">
+                <h3 class="text-xl font-bold text-dark dark:text-white">
+                    {{ $t("importFromFile") }}
+                </h3>
+                <p class="text-sm text-gray">{{ $t("importFileHint") }}</p>
+                <label
+                    class="button flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg bg-primary px-6 py-3 text-center text-white hover:bg-primary-hover"
+                    :class="{
+                        'pointer-events-none opacity-50': importing,
+                    }"
+                >
+                    <Upload class="size-5 shrink-0" />
+                    <span>{{
+                        importing ? $t("importing") : $t("importFileButton")
+                    }}</span>
+                    <input
+                        type="file"
+                        accept=".json,application/json"
+                        class="sr-only"
+                        :disabled="importing"
+                        data-testid="import-file"
+                        @change="importFile"
+                    />
+                </label>
+            </div>
+            </div>
         </ModalWindow>
     </div>
 </template>
 <script setup lang="ts">
-import { ArchiveRestore, Import } from "lucide-vue-next";
+import {
+    ArchiveRestore,
+    ExternalLink,
+    FileSpreadsheet,
+    Import,
+    Upload,
+} from "lucide-vue-next";
 
 const nuxtApp = useNuxtApp();
 
@@ -286,6 +390,8 @@ const importing = ref(false);
 
 const openImport = () => {
     trelloUrl.value = "";
+    pendingTrello.value = null;
+    trelloToken.value = "";
     importBoard.value = true;
     setBodyScrollLock(true);
 };
@@ -323,6 +429,108 @@ const importTrelloBoard = async () => {
     } catch (e) {
         await nuxtApp.callHook("app:toast", {
             message: trelloErrorMessage(e?.data?.error || e?.message),
+        });
+    } finally {
+        importing.value = false;
+    }
+};
+
+// An export file from Wekan or Nextcloud Deck, sent as it is: the server reads
+// which of them wrote it. A Deck export can hold several boards; the first one
+// opens, and the toast says how many came across.
+const fileErrorMessage = (code) => {
+    const map = {
+        IMPORT_UNKNOWN_FORMAT: $t("importFileErrorUnknown"),
+        IMPORT_EMPTY: $t("importFileErrorEmpty"),
+        IMPORT_TOO_LARGE: $t("importFileErrorTooLarge"),
+    };
+    return map[code] || $t("trelloErrorGeneric");
+};
+
+// A private Trello board's files need the importer's own Trello access. The
+// file is looked at here first, and the token step shown only for a Trello
+// export of a private board that has files — and only on an instance that has
+// a Trello API key to ask for a token with.
+const trelloApiKey = String(useRuntimeConfig().public.trelloApiKey || "");
+const pendingTrello = ref(null);
+const trelloToken = ref("");
+const trelloAuthorizeUrl = computed(
+    () =>
+        `https://trello.com/1/authorize?expiration=1hour&scope=read&response_type=token&name=LokalBoards&key=${encodeURIComponent(trelloApiKey)}`,
+);
+
+const needsTrelloAccess = (json) =>
+    !!json &&
+    typeof json.shortLink === "string" &&
+    Array.isArray(json.lists) &&
+    Array.isArray(json.cards) &&
+    json._format === undefined &&
+    json.prefs?.permissionLevel !== "public" &&
+    json.cards.some(
+        (card) =>
+            !card.closed &&
+            ((card.attachments || []).some((file) => file.isUpload) ||
+                /trello\.com\/1\/cards\/[^\s)]*\/attachments\//.test(
+                    card.desc || "",
+                )),
+    );
+
+const importFile = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || importing.value) return;
+    if (trelloApiKey) {
+        let json = null;
+        try {
+            json = JSON.parse(await file.text());
+        } catch {
+            // Not JSON at all: the server says so in the usual way.
+        }
+        if (needsTrelloAccess(json)) {
+            trelloToken.value = "";
+            pendingTrello.value = file;
+            return;
+        }
+    }
+    await sendImportFile(file, "");
+};
+
+const sendImportFile = async (file, token) => {
+    if (importing.value) return;
+    importing.value = true;
+    try {
+        const data = await $fetch("/api/data/import/file", {
+            method: "POST",
+            body: file,
+            headers: {
+                "content-type": "application/json",
+                ...(token ? { "x-trello-token": token } : {}),
+            },
+        });
+        if (!data?.success || !data.boards?.length) {
+            throw new Error(data?.error || "IMPORT_FAILED");
+        }
+        importBoard.value = false;
+        pendingTrello.value = null;
+        trelloToken.value = "";
+        setBodyScrollLock(false);
+        await nuxtApp.callHook("app:toast", {
+            message:
+                data.boards.length === 1
+                    ? $t("boardImported")
+                    : $t("boardsImported", { count: data.boards.length }),
+        });
+        // Honest about what stayed behind: those files are links on their
+        // cards now, and this is the moment to know it.
+        if (data.linked) {
+            await nuxtApp.callHook("app:toast", {
+                message: $t("importFilesLinked", { count: data.linked }),
+            });
+        }
+        await navigateTo(`/board/${data.boards[0].id}`);
+    } catch (e) {
+        await nuxtApp.callHook("app:toast", {
+            message: fileErrorMessage(e?.data?.error || e?.message),
         });
     } finally {
         importing.value = false;

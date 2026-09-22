@@ -14,7 +14,7 @@ export default defineMcpHandler({
     "- A **board** contains ordered **areas** (columns/lists).",
     "- An **area** contains ordered **cards** (tasks).",
     "- A **card** has a name, a Markdown `content` (description), a done flag, an",
-    "  optional due date and assignee, plus **comments** and **attachments**.",
+    "  optional due date (which can repeat) and the people on it, plus **comments** and **attachments**.",
     "",
     "Authentication: send the user's API key in the `x-api-key` header, or as",
     "`Authorization: Bearer <key>` if that is all your client can send. `whoami`",

@@ -73,6 +73,12 @@ export default defineNuxtConfig({
       colorBlack: process.env.NUXT_PUBLIC_COLOR_BLACK || "#000000",
       colorDark: process.env.NUXT_PUBLIC_COLOR_DARK || "#1C1C1E",
       colorDarkDark: process.env.NUXT_PUBLIC_COLOR_DARK_DARK || "#1C1C1E",
+      // The API key Trello issued for a Power-Up, which lets somebody importing
+      // a private Trello board hand LokalBoards a token of their own, so the
+      // board's files can be downloaded as them. Public by nature: Trello's
+      // tokens are the secret, and the key only names the app asking for one.
+      // Without it a private board still imports, its files as links.
+      trelloApiKey: process.env.NUXT_PUBLIC_TRELLO_API_KEY || "",
     },
     appName: process.env.NUXT_APP_NAME || "LokalBoards",
     language: process.env.NUXT_LANGUAGE || "en",

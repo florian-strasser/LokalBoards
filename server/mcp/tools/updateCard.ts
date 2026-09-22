@@ -3,6 +3,14 @@ import { defineMcpTool } from "@nuxtjs/mcp-toolkit/server";
 import { setupDatabase } from "../../../app/lib/databaseSetup";
 import { getServerSocket } from "../../utils/socket";
 import { dispatchWebhooks } from "../../utils/webhooks";
+import { repeatAfterEdit } from "../../utils/repeat";
+import {
+  assigneeIdsFrom,
+  attachAssignees,
+  boardMemberIds,
+  setCardAssignees,
+} from "../../utils/cardAssignees";
+import { repeatCard } from "../../utils/repeatCard";
 import {
   requireUserId,
   requireWriteAccess,
@@ -19,7 +27,7 @@ export default defineMcpTool({
   name: "updateCard",
   title: "Update a card",
   description:
-    "Update fields of an existing card. Only the fields you pass are changed (partial update); pass at least one. `content` is Markdown. Set `dueDate` to an empty string to clear it, and `assigneeId` to an empty string to unassign. Needs edit access to the board.",
+    "Update fields of an existing card. Only the fields you pass are changed (partial update); pass at least one. `content` is Markdown. Set `dueDate` to an empty string to clear it. `assigneeIds` sets everyone on the card (a card can be on several people; [] takes everybody off). Marking a repeating card done creates the next one, returned as `next`. Needs edit access to the board.",
   annotations: {
     readOnlyHint: false,
     idempotentHint: true,
@@ -43,11 +51,23 @@ export default defineMcpTool({
       .describe(
         "Due date as ISO 8601 (e.g. 2026-08-01T09:00:00Z), or '' to clear.",
       ),
+    assigneeIds: z
+      .array(z.string())
+      .optional()
+      .describe(
+        "User ids of everyone who should be on the card — replaces the people on it; [] takes everybody off. Each must be a board member (see listBoardMembers).",
+      ),
     assigneeId: z
       .string()
       .optional()
       .describe(
-        "User id to assign (must be a board member; from listBoardMembers), or '' to unassign.",
+        "One user id to be the only person on the card, or '' to take everybody off. Ignored when assigneeIds is given.",
+      ),
+    repeat: z
+      .enum(["day", "week", "twoWeeks", "month", "year", ""])
+      .optional()
+      .describe(
+        "Make the card repeat: once it is marked done, the next one is created with its checklist unticked and the next due date in the series. Needs a due date. Pass '' to stop it repeating.",
       ),
   },
   inputExamples: [
@@ -57,7 +77,8 @@ export default defineMcpTool({
       name: "Redesign the logo",
       content: "Keep it **simple**.\n\n- [ ] first pass",
     },
-    { cardId: 3, dueDate: "2026-08-01T09:00:00Z", assigneeId: "u-ben" },
+    { cardId: 3, dueDate: "2026-08-01T09:00:00Z", assigneeIds: ["u-ben", "u-ada"] },
+    { cardId: 4, dueDate: "2026-08-03T09:00:00Z", repeat: "week" },
   ],
   handler: async ({
     cardId,
@@ -67,7 +88,9 @@ export default defineMcpTool({
     done,
     status,
     dueDate,
+    assigneeIds,
     assigneeId,
+    repeat,
   }) => {
     const userId = requireUserId();
     requireWriteAccess();
@@ -105,34 +128,64 @@ export default defineMcpTool({
         values.push(d);
       }
     }
-    if (assigneeId !== undefined) {
-      if (assigneeId === "") {
-        fields.push("assignee = ?");
-        values.push(null);
-      } else {
-        const [[member]]: any = await db.query(
-          "SELECT 1 AS ok FROM boards WHERE id = ? AND user = ? UNION SELECT 1 AS ok FROM invitations WHERE board = ? AND user = ? LIMIT 1",
-          [board.id, assigneeId, board.id, assigneeId],
+    // Who is on it: `assigneeIds` replaces everyone, `assigneeId` replaces
+    // everyone with one person ('' for nobody). Left out, nobody changes.
+    const people =
+      assigneeIds !== undefined
+        ? assigneeIdsFrom(assigneeIds)
+        : assigneeId !== undefined
+          ? assigneeIdsFrom(assigneeId === "" ? [] : [assigneeId])
+          : null;
+    if (people) {
+      const members = await boardMemberIds(db, board.id);
+      const stranger = people.find((person) => !members.has(person));
+      if (stranger) {
+        throw new McpError(
+          "VALIDATION",
+          `'${stranger}' is not a member of this board (see listBoardMembers).`,
         );
-        if (!member) {
-          throw new McpError(
-            "VALIDATION",
-            `assigneeId '${assigneeId}' is not a member of this board (see listBoardMembers).`,
-          );
-        }
-        fields.push("assignee = ?");
-        values.push(assigneeId);
       }
     }
 
-    if (fields.length === 0) {
+    // The rhythm belongs to the due date, so either of them changing can
+    // change it (see `server/utils/repeat.ts`).
+    if (repeat !== undefined || dueDate !== undefined) {
+      const due =
+        dueDate === undefined
+          ? card.dueDate
+            ? new Date(card.dueDate)
+            : null
+          : dueDate === ""
+            ? null
+            : new Date(dueDate);
+      if (repeat && !due) {
+        throw new McpError(
+          "VALIDATION",
+          "A card needs a due date to repeat. Pass dueDate as well.",
+        );
+      }
+      const before = card.dueDate ? new Date(card.dueDate).getTime() : null;
+      const state = repeatAfterEdit(
+        card,
+        repeat,
+        due,
+        dueDate !== undefined && (due ? due.getTime() : null) !== before,
+      );
+      fields.push("repeatEvery = ?", "repeatAnchor = ?", "repeatArea = ?");
+      values.push(state.repeatEvery, state.repeatAnchor, state.repeatArea);
+    }
+
+    if (fields.length === 0 && people === null) {
       throw new McpError("VALIDATION", "Provide at least one field to update.");
     }
 
-    await db.execute(`UPDATE cards SET ${fields.join(", ")} WHERE id = ?`, [
-      ...values,
-      id,
-    ]);
+    if (fields.length) {
+      await db.execute(`UPDATE cards SET ${fields.join(", ")} WHERE id = ?`, [
+        ...values,
+        id,
+      ]);
+    }
+    if (people) await setCardAssignees(db, id, board.id, people);
 
     // A changed due date means the reminders should fire again — the same rule
     // the web app applies (server/api/data/card.ts), otherwise a card
@@ -144,10 +197,15 @@ export default defineMcpTool({
       );
     }
 
+    // Done, and a repeating card: the next one goes on the board, and the card
+    // read back below is the one that no longer repeats.
+    const next =
+      doneVal && !card.status ? await repeatCard(db, id, userId) : null;
+
     const [rows]: any = await db.execute("SELECT * FROM cards WHERE id = ?", [
       id,
     ]);
-    const updatedCard = rows[0];
+    const [updatedCard] = await attachAssignees(db, rows);
 
     // Notify collaborators when the done state actually changed.
     if (doneVal !== undefined && !!card.status !== !!doneVal) {
@@ -193,6 +251,9 @@ export default defineMcpTool({
       card: serializeCard(updatedCard),
     });
 
-    return jsonResult({ card: serializeCard(updatedCard) });
+    return jsonResult({
+      card: serializeCard(updatedCard),
+      ...(next ? { next: serializeCard(next) } : {}),
+    });
   },
 });

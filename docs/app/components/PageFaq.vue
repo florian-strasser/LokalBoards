@@ -53,9 +53,9 @@ const faq = [
       "<p>Backups are yours to arrange, and there is nothing special to it: the data is an ordinary MySQL database and the attachments are ordinary files, so whatever you already back up with will do.</p><p>Restoring is the same in reverse — put the database back and the attachments with it. Nothing about LokalBoards has to be told that it happened.</p>",
   },
   {
-    frage: "Can I import my Trello boards?",
+    frage: "Can I bring my boards over from Trello, Wekan or Nextcloud Deck?",
     antwort:
-      "<p>Yes. Paste a link to a public Trello board and LokalBoards recreates it: lists, cards, descriptions, checklists, comments, attachments and completion status.</p>",
+      "<p>Yes. Paste a link to a public Trello board, or choose the export file Trello, Wekan or Nextcloud Deck writes — which is how a private Trello board comes over — and LokalBoards recreates the boards: lists, cards, descriptions, checklists, labels, due dates, comments and what was already done, and the attachments wherever the export makes that possible.</p>",
   },
   {
     frage: "Which languages are available?",

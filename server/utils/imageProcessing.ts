@@ -53,3 +53,21 @@ export async function toWebp(
 export function widthFor(purpose: ImagePurpose): number | undefined {
   return purpose === "avatar" ? AVATAR_MAX_WIDTH : undefined;
 }
+
+/**
+ * Stores an image the way one pasted into a card is stored — re-encoded as
+ * WebP under `public/uploads` — and answers with the address to put in the
+ * text, or null when the bytes are not an image.
+ */
+export async function saveContentImage(input: Buffer): Promise<string | null> {
+  const encoded = await toWebp(input, { maxWidth: widthFor("content") });
+  if (!encoded) return null;
+  const { promises: fs } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { randomBytes } = await import("node:crypto");
+  const uploadDir = join(process.cwd(), "public", "uploads");
+  await fs.mkdir(uploadDir, { recursive: true });
+  const name = `${randomBytes(16).toString("hex")}.webp`;
+  await fs.writeFile(join(uploadDir, name), encoded.data);
+  return `/api/uploads/${name}`;
+}
