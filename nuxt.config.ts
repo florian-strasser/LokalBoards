@@ -228,8 +228,9 @@ export default defineNuxtConfig({
     scheduledTasks: {
       // Email unread notifications every hour
       "0 * * * *": ["notification"],
-      // Fire card due-date reminders every 5 minutes
-      "*/5 * * * *": ["due-reminders"],
+      // Fire card due-date reminders, and put the next card of every
+      // repeating series on its board, every 5 minutes
+      "*/5 * * * *": ["due-reminders", "repeat-cards"],
       // Empty the archive of anything past its retention, once a night
       "30 3 * * *": ["archive-retention"],
     },

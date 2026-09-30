@@ -50,7 +50,10 @@
             :style="{ y, opacity: cardOpacity }"
             @click="closeFromOutside"
         >
-            <div class="relative w-full sm:max-w-lg mx-auto">
+            <div
+                class="relative w-full mx-auto"
+                :class="wide ? 'sm:max-w-[44rem]' : 'sm:max-w-lg'"
+            >
                 <div
                     class="absolute top-0 right-0 w-12 transform sm:translate-x-1/2 -translate-y-1/2 z-30"
                 >
@@ -77,6 +80,12 @@ import { motion, useMotionValue, animate } from "motion-v";
 
 const props = defineProps({
     hideClose: Boolean,
+    // A card holds more than a short form does — a row of buttons for the due
+    // date, the people on it, its labels and how it repeats, then a
+    // description and a conversation. 44rem is what keeps that row on one line
+    // on a desktop with a date, a name and the longest rhythm in it; at the
+    // width a confirmation dialog wants, the last button wraps onto its own.
+    wide: Boolean,
 });
 
 const open = defineModel();

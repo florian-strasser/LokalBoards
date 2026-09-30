@@ -43,6 +43,7 @@
                 props.card.attachmentCount ||
                 checklist.total ||
                 props.card.dueDate ||
+                props.card.repeatEvery ||
                 props.viewers.length
             "
             class="pl-8 mt-1 flex items-center text-sm gap-x-2 gap-y-1 flex-wrap text-gray"
@@ -104,14 +105,15 @@
             >
                 <Clock class="size-4 shrink-0 grow-0" />
                 <span class="shrink-0 grow-0">{{ dueDateLabel }}</span>
-                <!-- Repeats once it is done: the next one is already
-                     scheduled, which is worth knowing before ticking it. -->
-                <Repeat
-                    v-if="props.card.repeatEvery"
-                    class="size-4 shrink-0 grow-0"
-                    :aria-label="$t('repeats')"
-                />
             </div>
+            <!-- It comes back: the next one arrives on its own when the rhythm
+                 comes round, which is worth knowing while looking at this one.
+                 Outside the due date, because a card can repeat without one. -->
+            <Repeat
+                v-if="props.card.repeatEvery"
+                class="size-4 shrink-0 grow-0"
+                :aria-label="$t('repeats')"
+            />
         </div>
     </button>
 </template>

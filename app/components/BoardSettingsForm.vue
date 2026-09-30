@@ -28,6 +28,7 @@
                     :values="[
                         { value: 'kanban', label: $t('kanBan') },
                         { value: 'todo', label: $t('toDo') },
+                        { value: 'mindmap', label: $t('mindMap') },
                     ]"
                     name="style"
                     v-model="style"

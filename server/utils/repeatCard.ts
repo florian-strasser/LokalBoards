@@ -1,34 +1,40 @@
 import { recordCardActivity } from "./cardActivity";
 import { attachAssignees, copyCardAssignees } from "./cardAssignees";
 import { nextCardSort } from "./cardPositions";
-import { isRepeatEvery, nextOccurrence, untickChecklist } from "./repeat";
+import { isRepeatEvery, planNextCard, untickChecklist } from "./repeat";
 import { getServerSocket } from "./socket";
 import { dispatchWebhooks } from "./webhooks";
 
-// The moment a repeating card is marked done: the next one goes on the board.
+// The sweep that puts the next card of a repeating series on the board.
 //
-// Called by everything that can mark a card done — the dialog, the REST API and
-// the MCP tools — after the card has been saved as done. Anything that is not a
-// repeating card is left alone and gets `null` back.
+// It runs on a schedule (`server/tasks/repeat-cards.ts`, every five minutes)
+// and once at startup, so a card that was due to appear while the instance was
+// off appears as soon as it is back. Nobody has to do anything for it: the next
+// card is made when the rhythm comes round, whether or not the one before it
+// was marked done. What that means in practice is that a job nobody got to
+// leaves an undone card behind and this week's card still arrives.
 //
-// The series moves to the new card rather than being copied onto it. The card
-// that was done keeps what it was, as the record of that week, but no longer
-// repeats — so ticking it off, on again and off again cannot put a second next
-// card on the board. Taking the rhythm off it is also how two requests racing
-// to finish the same card are kept apart: only the one whose update actually
-// changed the row goes on to create anything.
+// The series moves to the new card rather than being copied onto it, and that
+// move is also the lock: only the sweep whose UPDATE actually cleared the
+// rhythm goes on to make anything, so two servers sharing one database — or a
+// scheduled run overlapping the one at startup — cannot put the same card on
+// the board twice.
+
+// One card of a series, if it is still owed one. Returns the new card, or null
+// when the card was not (or is no longer) a repeating card.
 export async function repeatCard(
   db: any,
   cardId: number,
-  actorId: string,
+  actorId: string | null,
+  now: Date = new Date(),
 ): Promise<any | null> {
   const [[card]]: any = await db.execute("SELECT * FROM cards WHERE id = ?", [
     cardId,
   ]);
-  if (!card || !isRepeatEvery(card.repeatEvery) || !card.dueDate) return null;
+  if (!card || !isRepeatEvery(card.repeatEvery)) return null;
 
   const [handedOn]: any = await db.execute(
-    "UPDATE cards SET repeatEvery = NULL, repeatAnchor = NULL, repeatArea = NULL WHERE id = ? AND repeatEvery IS NOT NULL",
+    "UPDATE cards SET repeatEvery = NULL, repeatAnchor = NULL, repeatArea = NULL, repeatNext = NULL WHERE id = ? AND repeatEvery IS NOT NULL",
     [cardId],
   );
   if (!handedOn.affectedRows) return null;
@@ -48,22 +54,24 @@ export async function repeatCard(
     if (home) area = Number(home.id);
   }
 
-  const due = new Date(card.dueDate);
-  const anchor = card.repeatAnchor ? new Date(card.repeatAnchor) : due;
-  const after = new Date(Math.max(due.getTime(), Date.now()));
-  const nextDue = nextOccurrence(anchor, card.repeatEvery, after);
+  const due = card.dueDate ? new Date(card.dueDate) : null;
+  const anchor = card.repeatAnchor
+    ? new Date(card.repeatAnchor)
+    : (due ?? new Date(now.getTime()));
+  const plan = planNextCard({ every: card.repeatEvery, anchor, due }, now);
 
   const [inserted]: any = await db.execute(
-    "INSERT INTO cards (area, name, content, status, sort, dueDate, repeatEvery, repeatAnchor, repeatArea) VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?)",
+    "INSERT INTO cards (area, name, content, status, sort, dueDate, repeatEvery, repeatAnchor, repeatArea, repeatNext) VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?, ?)",
     [
       area,
       card.name,
       untickChecklist(card.content || ""),
       await nextCardSort(db, area),
-      nextDue,
+      plan.due,
       card.repeatEvery,
       anchor,
       area,
+      plan.repeatNext,
     ],
   );
   const nextId = Number(inserted.insertId);
@@ -86,7 +94,7 @@ export async function repeatCard(
   });
   await recordCardActivity(cardId, "repeated", actorId, {
     nextId,
-    dueDate: nextDue.toISOString(),
+    dueDate: plan.due ? plan.due.toISOString() : null,
   });
 
   // The shape the board draws a card from, labels included, so it can go
@@ -108,9 +116,9 @@ export async function repeatCard(
   next.labels = labels;
   next.reminders = reminders.map((row: any) => row.minutesBefore);
 
-  // Nobody asked for this card, the browser included, so the server tells
-  // every open board — the person who ticked the box among them. A server
-  // without its socket (a script, a test) still gets the card.
+  // Nobody asked for this card, no browser and no person, so the server tells
+  // every open board it appeared. A server without its socket (a script, a
+  // test) still gets the card.
   try {
     getServerSocket()
       .to(`board-${board?.id}`)
@@ -125,4 +133,32 @@ export async function repeatCard(
   });
 
   return next;
+}
+
+/**
+ * Every series whose turn has come. Archived cards are passed over — a card
+ * put away is not a series anybody is waiting on — and take their turn again
+ * if they are restored.
+ */
+export async function repeatDueCards(
+  db: any,
+  now: Date = new Date(),
+): Promise<{ created: number }> {
+  const [rows]: any = await db.execute(
+    "SELECT id FROM cards WHERE repeatEvery IS NOT NULL AND repeatNext IS NOT NULL AND repeatNext <= ? AND archivedAt IS NULL ORDER BY id ASC",
+    [now],
+  );
+  let created = 0;
+  for (const row of rows) {
+    try {
+      // No actor: nobody did this, the rhythm did. The card's history says so
+      // by naming the instance rather than a person.
+      if (await repeatCard(db, Number(row.id), null, now)) created++;
+    } catch (error) {
+      // One card that cannot be repeated — a column deleted underneath it, a
+      // row another server took first — must not stop the rest of the sweep.
+      logger.error(`Could not repeat card ${row.id}:`, error);
+    }
+  }
+  return { created };
 }

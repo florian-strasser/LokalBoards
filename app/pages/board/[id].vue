@@ -1,10 +1,23 @@
 <template>
     <div
         class="flex flex-col justify-between"
-        :class="boardStyle === 'kanban' ? 'h-svh overflow-hidden' : 'min-h-svh'"
+        :class="
+            boardStyle === 'kanban' || boardStyle === 'mindmap'
+                ? 'h-svh overflow-hidden'
+                : 'min-h-svh'
+        "
     >
-        <AppHeader />
-        <div class="w-full pt-12 pb-7 grow-0 shrink-0">
+        <!-- A mind map runs on up behind the header and the title rather than
+             stopping at an edge below them, so on that layout they are lifted
+             above it: its controls stay on top and pressable, and the map is
+             seen through the space around them. -->
+        <div :class="{ 'relative z-20': boardStyle === 'mindmap' }">
+            <AppHeader />
+        </div>
+        <div
+            class="w-full pt-12 pb-7 grow-0 shrink-0"
+            :class="{ 'relative z-20': boardStyle === 'mindmap' }"
+        >
             <Connection
                 :userID="userID"
                 :boardID="boardID"
@@ -22,6 +35,7 @@
                 @area-deleted="handleDeleteArea"
                 @comment-count-updated="handleCommentCountUpdated"
                 @presence-updated="handlePresenceUpdated"
+                @map-moved="handleMapMoved"
             />
             <div class="container">
                 <div
@@ -166,9 +180,11 @@
         </div>
         <div
             ref="boardScroller"
-            class="@container w-full grow min-h-0 overflow-x-auto overflow-y-hidden bg-slate dark:bg-dark"
+            class="@container w-full grow min-h-0 bg-slate dark:bg-dark"
             :class="{
-                'pb-10': boardStyle !== 'kanban',
+                'overflow-x-auto overflow-y-hidden': boardStyle !== 'mindmap',
+                'overflow-visible': boardStyle === 'mindmap',
+                'pb-10': boardStyle === 'todo',
                 // `scroll-pl-8` matches the areas wrapper's own `px-8`: without
                 // it a snapped area's left edge lands flush with the scroll
                 // container's edge rather than at the same 2rem inset as
@@ -177,7 +193,7 @@
                     boardStyle === 'kanban' && !areaSnapSuspended,
             }"
             :style="
-                anyModalOpen
+                anyModalOpen && boardStyle !== 'mindmap'
                     ? {
                           overflowX: 'hidden',
                           paddingBottom: horizontalScrollbar
@@ -194,8 +210,27 @@
                  area lines up with the header's right edge instead of running to
                  the viewport edge (Safari otherwise drops a flex container's
                  padding-right on overflow). -->
+            <MindMap
+                v-if="!accessError && boardStyle === 'mindmap'"
+                :boardID="boardID"
+                :boardName="boardName"
+                :board="boardNode"
+                :areas="areas"
+                :cards="cards"
+                :writeAccess="writeAccess"
+                :userID="userID"
+                :filtering="filtering"
+                :cardVisible="cardVisible"
+                :unreadCardIds="unreadCardIds"
+                v-model:cardModal="cardModal"
+                @card-created="handleLocalCardCreated"
+                @card-moved="handleCardMovedByDialog"
+                @area-new="createAreaOnMap"
+                @area-renamed="updateAreaName"
+                @area-deleted="openDeleteAreaModal"
+            />
             <div
-                v-if="!accessError"
+                v-else-if="!accessError"
                 ref="areasWrapper"
                 data-onboarding="areas"
                 class="px-8"
@@ -425,7 +460,7 @@
                 {{ $t("deleteAreaButton") }}
             </button>
         </ModalWindow>
-        <ModalWindow v-model="cardModalOpen" :hideClose="true">
+        <ModalWindow v-model="cardModalOpen" :hideClose="true" wide>
             <CardModal
                 v-if="cardModal && selectedCard"
                 :card="selectedCard"
@@ -503,6 +538,9 @@ const restoreBoard = async () => {
     }
 };
 const boardStyle = ref("kanban");
+// Where the board's own node sits when it is drawn as a mind map — the root
+// everything else hangs off. Empty until somebody drags it.
+const boardNode = reactive({ mapX: null, mapY: null });
 const boardStatus = ref("private");
 const boardImage = ref(null);
 const boardColor = ref(null);
@@ -932,6 +970,49 @@ const handleCardMovedByDialog = async ({
         console.error("Error moving card:", error);
         await nuxtApp.callHook("app:toast", { message: $t("moveCardFailed") });
     }
+};
+
+// The map has no column to type a name into, so a new area arrives with one to
+// be typed over on the node itself.
+const createAreaOnMap = async () => {
+    newAreaName.value = $t("newAreaName");
+    await createArea();
+};
+
+// Somebody else dragged a branch. Written into the same places the board's own
+// data holds, so the map redraws whether or not it is the layout in front of
+// this person right now.
+const applyMapNodes = (nodes) => {
+    for (const node of nodes || []) {
+        if (node.kind === "board") {
+            boardNode.mapX = node.x;
+            boardNode.mapY = node.y;
+        } else if (node.kind === "area") {
+            const area = areas.value.find(
+                (item) => Number(item.id) === Number(node.id),
+            );
+            if (area) {
+                area.mapX = node.x;
+                area.mapY = node.y;
+            }
+        } else if (node.kind === "card") {
+            for (const list of Object.values(cards.value)) {
+                const card = list.find(
+                    (item) => Number(item.id) === Number(node.id),
+                );
+                if (card) {
+                    card.mapX = node.x;
+                    card.mapY = node.y;
+                    break;
+                }
+            }
+        }
+    }
+};
+
+const handleMapMoved = ({ boardId, nodes }) => {
+    if (Number(boardId) !== Number(boardID.value)) return;
+    applyMapNodes(nodes);
 };
 
 const createArea = async () => {
@@ -1535,6 +1616,8 @@ try {
         boardUser.value = data.value.board.user;
         boardArchived.value = !!data.value.board.archivedAt;
         boardStyle.value = data.value.board.style || "kanban";
+        boardNode.mapX = data.value.board.mapX ?? null;
+        boardNode.mapY = data.value.board.mapY ?? null;
         boardStatus.value = data.value.board.status || "private";
         boardImage.value = data.value.board.image || null;
         boardColor.value = data.value.board.color || null;

@@ -3,6 +3,7 @@ import {
   isRepeatEvery,
   nextOccurrence,
   occurrence,
+  planNextCard,
   repeatAfterEdit,
   untickChecklist,
 } from "../server/utils/repeat";
@@ -93,43 +94,114 @@ describe("untickChecklist", () => {
 
 describe("repeatAfterEdit", () => {
   const due = at(2026, 9, 28);
+  const now = at(2026, 9, 21, 14, 30);
   const card = { area: 4 };
 
   it("switching it on anchors the series on the due date and the current column", () => {
-    expect(repeatAfterEdit(card, "week", due, false)).toEqual({
+    expect(repeatAfterEdit(card, "week", due, false, now)).toEqual({
       repeatEvery: "week",
       repeatAnchor: due,
       repeatArea: 4,
+      // With a due date the sweep acts as that date arrives: the next card is
+      // made then, leaving a whole week to do it in.
+      repeatNext: due,
     });
   });
 
-  it("is off without a due date, or when asked to stop", () => {
+  it("repeats without a due date, counted from the moment it was set", () => {
+    const state = repeatAfterEdit(card, "week", null, false, now);
+    expect(state.repeatEvery).toBe("week");
+    expect(parts(state.repeatAnchor!)).toEqual(parts(now));
+    expect(parts(state.repeatNext!)).toEqual([2026, 9, 28, 14, 30]);
+  });
+
+  it("is off only when asked to stop", () => {
     const on = { area: 4, repeatEvery: "week", repeatAnchor: due, repeatArea: 4 };
-    const off = { repeatEvery: null, repeatAnchor: null, repeatArea: null };
-    expect(repeatAfterEdit(on, undefined, null, true)).toEqual(off);
-    expect(repeatAfterEdit(on, null, due, false)).toEqual(off);
-    expect(repeatAfterEdit(on, "", due, false)).toEqual(off);
-    expect(repeatAfterEdit(card, "fortnightly-ish", due, false)).toEqual(off);
+    const off = {
+      repeatEvery: null,
+      repeatAnchor: null,
+      repeatArea: null,
+      repeatNext: null,
+    };
+    expect(repeatAfterEdit(on, null, due, false, now)).toEqual(off);
+    expect(repeatAfterEdit(on, "", due, false, now)).toEqual(off);
+    expect(repeatAfterEdit(card, "fortnightly-ish", due, false, now)).toEqual(off);
+  });
+
+  it("keeps repeating when the due date is taken away", () => {
+    const anchor = at(2026, 9, 7); // a Monday
+    const on = { area: 4, repeatEvery: "week", repeatAnchor: anchor, repeatArea: 4 };
+    const state = repeatAfterEdit(on, undefined, null, true, now);
+    expect(state.repeatEvery).toBe("week");
+    // Still Mondays: the rhythm keeps the anchor it had rather than restarting
+    // from today, which is a Monday two weeks on.
+    expect(state.repeatAnchor).toEqual(anchor);
+    expect(parts(state.repeatNext!)).toEqual([2026, 9, 28, 9, 0]);
   });
 
   it("leaves the series alone on an edit that does not touch it", () => {
     const anchor = at(2026, 1, 31);
     const on = { area: 9, repeatEvery: "month", repeatAnchor: anchor, repeatArea: 4 };
-    expect(repeatAfterEdit(on, undefined, at(2026, 2, 28), false)).toEqual({
+    expect(repeatAfterEdit(on, undefined, at(2026, 2, 28), false, now)).toEqual({
       repeatEvery: "month",
       repeatAnchor: anchor,
       repeatArea: 4,
+      repeatNext: at(2026, 2, 28),
     });
   });
 
   it("follows the due date when it is moved by hand", () => {
     const on = { area: 4, repeatEvery: "week", repeatAnchor: at(2026, 9, 21), repeatArea: 4 };
     const moved = at(2026, 9, 29);
-    expect(repeatAfterEdit(on, undefined, moved, true).repeatAnchor).toEqual(moved);
+    const state = repeatAfterEdit(on, undefined, moved, true, now);
+    expect(state.repeatAnchor).toEqual(moved);
+    expect(state.repeatNext).toEqual(moved);
   });
 
   it("knows the rhythms it accepts", () => {
     expect(["day", "week", "twoWeeks", "month", "year"].every(isRepeatEvery)).toBe(true);
     expect(isRepeatEvery("hour")).toBe(false);
+  });
+});
+
+describe("planNextCard", () => {
+  const anchor = at(2026, 9, 7, 9, 0);
+
+  it("gives the next card the next date in the series, and makes it then", () => {
+    const plan = planNextCard(
+      { every: "week", anchor, due: at(2026, 9, 21, 9, 0) },
+      at(2026, 9, 21, 9, 0),
+    );
+    expect(parts(plan.due!)).toEqual([2026, 9, 28, 9, 0]);
+    // The card after that is made as this one falls due.
+    expect(plan.repeatNext).toEqual(plan.due);
+  });
+
+  it("skips the dates that went by while nobody was looking", () => {
+    // A card due three weeks ago on an instance that was switched off: one
+    // card, dated next week, rather than three overdue ones.
+    const plan = planNextCard(
+      { every: "week", anchor, due: at(2026, 9, 7, 9, 0) },
+      at(2026, 9, 26, 12, 0),
+    );
+    expect(parts(plan.due!)).toEqual([2026, 9, 28, 9, 0]);
+  });
+
+  it("without a due date, only says when the next one is made", () => {
+    const plan = planNextCard(
+      { every: "week", anchor, due: null },
+      at(2026, 9, 21, 9, 0),
+    );
+    expect(plan.due).toBeNull();
+    expect(parts(plan.repeatNext)).toEqual([2026, 9, 28, 9, 0]);
+  });
+
+  it("keeps a monthly card on the last day it was anchored to", () => {
+    const last = at(2026, 1, 31, 8, 0);
+    const plan = planNextCard(
+      { every: "month", anchor: last, due: at(2026, 2, 28, 8, 0) },
+      at(2026, 2, 28, 8, 0),
+    );
+    expect(parts(plan.due!)).toEqual([2026, 3, 31, 8, 0]);
   });
 });

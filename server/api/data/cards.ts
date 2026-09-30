@@ -86,7 +86,7 @@ export default defineEventHandler(async (event) => {
         }
 
         const [rows] = await db.execute(
-          `SELECT c.id, c.area, c.name, c.content, c.status, c.sort, c.dueDate, c.repeatEvery, (SELECT COUNT(*) FROM comments co WHERE co.card = c.id) as commentCount, (SELECT COUNT(*) FROM attachments a WHERE a.card = c.id) as attachmentCount FROM cards c WHERE ${filters.join(" AND ")} ORDER BY c.sort ASC, c.id ASC`,
+          `SELECT c.id, c.area, c.name, c.content, c.status, c.sort, c.dueDate, c.repeatEvery, c.mapX, c.mapY, (SELECT COUNT(*) FROM comments co WHERE co.card = c.id) as commentCount, (SELECT COUNT(*) FROM attachments a WHERE a.card = c.id) as attachmentCount FROM cards c WHERE ${filters.join(" AND ")} ORDER BY c.sort ASC, c.id ASC`,
           params,
         );
         const cards = await attachAssignees(db, rows);

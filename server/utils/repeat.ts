@@ -1,16 +1,26 @@
 // Cards that repeat.
 //
-// A repeating card is one with a due date and a rhythm. Marking it done keeps
-// it as it is — done, a record of that time — and puts the next one on the
-// board: the same card with its checklist unticked, due at the next date in the
-// series. So "repeats" is a property of the due date, and nothing else about
-// the card has to know.
+// A repeating card has a rhythm — every day, week, two weeks, month or year —
+// and nothing else is required of it. Each time the rhythm comes round the next
+// card goes on the board on its own, whether or not the one before it was ever
+// marked done: a job that comes back every week comes back every week, and a
+// week somebody skipped is a card left undone rather than a card that never
+// appeared. What puts it there is the scheduled sweep in `repeatCard.ts`, not
+// the tick box.
+//
+// A due date is optional and independent. With one, the next card is made when
+// that date arrives and is due at the next date in the series — so the card for
+// next Monday appears as this Monday passes, leaving the week to do it in.
+// Without one, the card simply appears each time the rhythm comes round,
+// counted from the moment the rhythm was set.
 //
 // The series is counted from an anchor: the due date as it was when the rhythm
-// was set, or when the due date was last changed by hand. Counting from the
-// anchor rather than from the previous card is what keeps a card due on the
-// 31st on the 31st: stepped month by month it would land on the 28th in
-// February and stay there for good.
+// was set or last moved by hand, or otherwise the moment the rhythm was set.
+// Counting from the anchor rather than from the previous card is what keeps a
+// card due on the 31st on the 31st: stepped month by month it would land on the
+// 28th in February and stay there for good. Taking the due date off a repeating
+// card keeps the anchor, so a card that came every Monday keeps coming on
+// Mondays.
 //
 // Dates are worked out on the instance's own clock (the server's time zone,
 // which is also what every date in the app is shown in). Adding a week there
@@ -51,10 +61,11 @@ export function occurrence(anchor: Date, every: RepeatEvery, count: number): Dat
 }
 
 /**
- * The first date in the series that is later than `after`. The board passes the
- * later of the card's own due date and now: done early, the next one is simply
- * the next date; done late, the dates that have already gone by are skipped
- * rather than piled up as overdue cards.
+ * The first date in the series that is later than `after`. The sweep passes the
+ * later of the card's own date and now: on time, the next one is simply the
+ * next date; late — a card nobody touched, or an instance that was switched
+ * off for a fortnight — the dates that have gone by are skipped rather than
+ * arriving all at once as a pile of cards.
  */
 export function nextOccurrence(
   anchor: Date,
@@ -96,17 +107,21 @@ export interface RepeatState {
   repeatEvery: RepeatEvery | null;
   repeatAnchor: Date | null;
   repeatArea: number | null;
+  /** When the next card is to be made. What the sweep looks for. */
+  repeatNext: Date | null;
 }
 
 /**
  * What a card's repeat settings become after an edit.
  *
  * `requested` is what the caller sent: `undefined` leaves the rhythm as it is,
- * `null` or `""` stops it, a rhythm sets it. Without a due date there is
- * nothing to repeat, so clearing the due date stops it too. The anchor follows
- * the due date whenever the rhythm is switched on or changed, and whenever the
- * due date is moved by hand; the column the next card goes to is the one the
- * card is in when the rhythm is switched on.
+ * `null` or `""` stops it, a rhythm sets it. A due date is not needed — and
+ * setting, moving or removing one never stops a card repeating.
+ *
+ * The anchor follows the due date whenever the rhythm is switched on or
+ * changed, and whenever the due date is moved by hand; a card that has no due
+ * date is counted from the moment its rhythm was set. The column the next card
+ * goes to is the one the card is in when the rhythm is switched on.
  */
 export function repeatAfterEdit(
   current: {
@@ -118,18 +133,49 @@ export function repeatAfterEdit(
   requested: unknown,
   due: Date | null,
   dueChanged: boolean,
+  now: Date = new Date(),
 ): RepeatState {
   const was = isRepeatEvery(current.repeatEvery) ? current.repeatEvery : null;
   const every =
     requested === undefined ? was : isRepeatEvery(requested) ? requested : null;
-  if (!every || !due) {
-    return { repeatEvery: null, repeatAnchor: null, repeatArea: null };
+  if (!every) {
+    return {
+      repeatEvery: null,
+      repeatAnchor: null,
+      repeatArea: null,
+      repeatNext: null,
+    };
   }
-  const anchor =
-    every !== was || dueChanged || !current.repeatAnchor
-      ? due
-      : new Date(current.repeatAnchor);
+  const kept = current.repeatAnchor ? new Date(current.repeatAnchor) : null;
+  const fresh = every !== was || !kept;
+  // With a due date the series hangs off it; without, off the anchor it
+  // already had — so taking the due date away leaves the rhythm where it was
+  // rather than restarting it from today.
+  const anchor = due ? (fresh || dueChanged ? due : kept!) : fresh ? now : kept!;
   const area =
     was && current.repeatArea != null ? Number(current.repeatArea) : current.area;
-  return { repeatEvery: every, repeatAnchor: anchor, repeatArea: area };
+  return {
+    repeatEvery: every,
+    repeatAnchor: anchor,
+    repeatArea: area,
+    repeatNext: due ?? nextOccurrence(anchor, every, now),
+  };
+}
+
+/**
+ * The next card in a series, as dates: when it is due, and when the one after
+ * it is to be made. A card with a due date hands its date to the sweep, so the
+ * next card is made as this one's date arrives and is due a rhythm later; a
+ * card without one is simply made each time the rhythm comes round.
+ */
+export function planNextCard(
+  card: { every: RepeatEvery; anchor: Date; due: Date | null },
+  now: Date = new Date(),
+): { due: Date | null; repeatNext: Date } {
+  if (!card.due) {
+    return { due: null, repeatNext: nextOccurrence(card.anchor, card.every, now) };
+  }
+  const after = new Date(Math.max(card.due.getTime(), now.getTime()));
+  const due = nextOccurrence(card.anchor, card.every, after);
+  return { due, repeatNext: due };
 }

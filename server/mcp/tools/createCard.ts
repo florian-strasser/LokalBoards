@@ -3,6 +3,7 @@ import { defineMcpTool } from "@nuxtjs/mcp-toolkit/server";
 import { setupDatabase } from "../../../app/lib/databaseSetup";
 import { getServerSocket } from "../../utils/socket";
 import { nextCardSort } from "../../utils/cardPositions";
+import { repeatAfterEdit } from "../../utils/repeat";
 import {
   assigneeIdsFrom,
   attachAssignees,
@@ -26,7 +27,7 @@ export default defineMcpTool({
   name: "createCard",
   title: "Create a card",
   description:
-    "Create a card at the end of an area. `content` (the description) is Markdown. Optionally set done, a dueDate (ISO 8601), the people on it (assigneeIds, board members) and, with a due date, a repeat rhythm. Collaborators are notified. Needs edit access to the board.",
+    "Create a card at the end of an area. `content` (the description) is Markdown. Optionally set done, a dueDate (ISO 8601), the people on it (assigneeIds, board members) and a repeat rhythm. Collaborators are notified. Needs edit access to the board.",
   annotations: { readOnlyHint: false, openWorldHint: false },
   inputSchema: {
     ...areaIdInput,
@@ -59,7 +60,7 @@ export default defineMcpTool({
       .enum(["day", "week", "twoWeeks", "month", "year"])
       .optional()
       .describe(
-        "Make the card repeat: once it is marked done, the next one is created with its checklist unticked and the next due date in the series. Needs a dueDate.",
+        "Make the card repeat: each time the rhythm comes round the next card is created on its own, with its checklist unticked — whether or not this one was done. A dueDate is optional; with one, the next card is made as that date arrives and is due a rhythm later. Pass '' to stop it repeating.",
       ),
     idempotencyKey: z
       .string()
@@ -116,12 +117,6 @@ export default defineMcpTool({
       }
       due = d;
     }
-    if (repeat && !due) {
-      throw new McpError(
-        "VALIDATION",
-        "A card needs a due date to repeat. Pass dueDate as well.",
-      );
-    }
     const people = assigneeIdsFrom(
       assigneeIds ?? (assigneeId ? [assigneeId] : []),
     );
@@ -138,10 +133,14 @@ export default defineMcpTool({
     // it has (see `cardPositions`).
     const sort = await nextCardSort(db, id);
 
+    // Where the series is counted from, and when it is next owed a card — the
+    // due date if there is one, otherwise from now (see `repeat.ts`).
+    const repeatState = repeatAfterEdit({ area: id }, repeat, due, true);
+
     let insertId: number;
     try {
       const [result]: any = await db.execute(
-        "INSERT INTO cards (area, name, content, status, sort, dueDate, idempotencyKey, repeatEvery, repeatAnchor, repeatArea) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO cards (area, name, content, status, sort, dueDate, idempotencyKey, repeatEvery, repeatAnchor, repeatArea, repeatNext) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         [
           id,
           name,
@@ -151,8 +150,9 @@ export default defineMcpTool({
           due,
           idempotencyKey || null,
           repeat || null,
-          repeat ? due : null,
+          repeat ? repeatState.repeatAnchor : null,
           repeat ? id : null,
+          repeat ? repeatState.repeatNext : null,
         ],
       );
       insertId = result.insertId;

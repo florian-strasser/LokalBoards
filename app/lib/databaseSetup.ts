@@ -144,7 +144,7 @@ const migrations: Migration[] = [
         \`id\` int NOT NULL AUTO_INCREMENT,
         \`user\` varchar(255) COLLATE utf8mb4_general_ci NOT NULL,
         \`name\` varchar(255) COLLATE utf8mb4_general_ci NOT NULL,
-        \`style\` enum('kanban','todo','notices') COLLATE utf8mb4_general_ci DEFAULT 'kanban',
+        \`style\` enum('kanban','todo','notices','mindmap') COLLATE utf8mb4_general_ci DEFAULT 'kanban',
         \`status\` enum('private','public') COLLATE utf8mb4_general_ci DEFAULT 'private',
         \`image\` longtext COLLATE utf8mb4_general_ci,
         \`color\` varchar(7) COLLATE utf8mb4_general_ci DEFAULT NULL,
@@ -1338,6 +1338,57 @@ const migrations: Migration[] = [
           await db.execute("ALTER TABLE `cards` DROP INDEX `cards_assignee`");
         }
         await db.execute("ALTER TABLE `cards` DROP COLUMN `assignee`");
+      }
+    },
+  },
+
+  {
+    // A card may repeat without a due date, and the next one is made by the
+    // scheduled sweep rather than by somebody ticking the box. `repeatNext` is
+    // when that is due to happen: the card's own due date where it has one,
+    // otherwise the next turn of its rhythm. Existing repeating cards all have
+    // a due date — that is what the old rule required — so theirs is it.
+    id: "0031_repeat_without_due_date",
+    up: async (db) => {
+      if (!(await columnExists(db, "cards", "repeatNext"))) {
+        await db.execute(
+          "ALTER TABLE `cards` ADD COLUMN `repeatNext` timestamp NULL DEFAULT NULL",
+        );
+      }
+      if (!(await indexExists(db, "cards", "cards_repeat_next"))) {
+        await db.execute(
+          "ALTER TABLE `cards` ADD INDEX `cards_repeat_next` (`repeatNext`)",
+        );
+      }
+      await db.execute(
+        "UPDATE `cards` SET `repeatNext` = `dueDate` WHERE `repeatEvery` IS NOT NULL AND `repeatNext` IS NULL",
+      );
+    },
+  },
+
+  {
+    // Where things sit on a board drawn as a mind map: the board's own node in
+    // the middle, its areas around it, and the cards around those. Empty on
+    // everything that has never been arranged — the map works those out from
+    // the board's order the first time it is opened, and only what somebody
+    // has actually dragged is ever written here. A board switched back to
+    // columns is unaffected: the order these coordinates sit beside is still
+    // what `sort` says.
+    id: "0032_mindmap_layout",
+    up: async (db) => {
+      // `style` is an enum, so the new layout has to be a value it allows
+      // before a board can be set to it.
+      await db.execute(
+        "ALTER TABLE `boards` MODIFY COLUMN `style` enum('kanban','todo','notices','mindmap') COLLATE utf8mb4_general_ci DEFAULT 'kanban'",
+      );
+      for (const table of ["boards", "areas", "cards"]) {
+        for (const column of ["mapX", "mapY"]) {
+          if (!(await columnExists(db, table, column))) {
+            await db.execute(
+              `ALTER TABLE \`${table}\` ADD COLUMN \`${column}\` int DEFAULT NULL`,
+            );
+          }
+        }
       }
     },
   },

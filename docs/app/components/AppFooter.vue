@@ -51,12 +51,13 @@
           </div>
         </div>
 
+        <!-- Who made it on the left, the legal pages on the right — the same
+             line the Chesstics site ends on. -->
         <div
           class="border-gray/15 mt-12 flex flex-wrap justify-between gap-x-6 gap-y-2 border-t pt-6"
         >
-          <p>© {{ year }} LokalBoards · MIT licensed</p>
           <p>
-            Made with ♥ by
+            © {{ year }}
             <a
               href="https://www.florian-strasser.de"
               target="_blank"
@@ -65,6 +66,13 @@
               >Florian Strasser</a
             >
           </p>
+          <ul class="flex flex-wrap gap-x-6 gap-y-2" aria-label="Legal">
+            <li v-for="link in legal" :key="link.to">
+              <NuxtLink :to="link.to" class="hover:text-primary">{{
+                link.label
+              }}</NuxtLink>
+            </li>
+          </ul>
         </div>
       </div>
     </div>
@@ -72,9 +80,9 @@
 </template>
 
 <script setup lang="ts">
-// Everything the footer links to, in the three groups it shows them in. A link
-// is either internal (`to`) or external (`href`); nothing here is a route that
-// does not exist.
+// Everything the footer links to, in the three groups it shows them in, and the
+// legal pages on the line underneath. A link is either internal (`to`) or
+// external (`href`); nothing here is a route that does not exist.
 const columns = [
   {
     title: "Menu",
@@ -95,12 +103,17 @@ const columns = [
     ],
   },
   {
-    title: "Legal",
+    title: "Other apps",
     links: [
-      { label: "Privacy policy", to: "/privacy-policy" },
-      { label: "Site notice", to: "/site-notice" },
+      { label: "LokalTransfer", href: "https://lokaltransfer.com" },
+      { label: "Chesstics", href: "https://chesstics.app" },
     ],
   },
+];
+
+const legal = [
+  { label: "Privacy policy", to: "/privacy-policy" },
+  { label: "Site notice", to: "/site-notice" },
 ];
 
 const year = new Date().getFullYear();

@@ -34,7 +34,7 @@ export default defineMcpTool({
       .optional()
       .describe("Deprecated alias for boardId."),
     name: z.string().min(1).optional().describe("New board name."),
-    style: z.enum(["kanban", "todo"]).optional().describe("New layout."),
+    style: z.enum(["kanban", "todo", "mindmap"]).optional().describe("New layout."),
     status: z
       .enum(["private", "public"])
       .optional()

@@ -1,14 +1,20 @@
-// A repeating card: marked done, the next one is on the board.
+// A repeating card comes back on its own.
 //
-// Set a card to repeat every week from the due-date menu, move it along to
-// "Done" and tick it off there, and the next one has to appear back in the
-// column the series was set up in — at the bottom, due at the next date in the
-// series after today, with its checklist unticked and its labels and reminders
-// carried over. The card that was done stays done and stops repeating, so
-// ticking it off and on again cannot put a second one on the board. The
-// colleague watching the board sees the new card without a reload, an
-// assistant marking a card done through MCP gets the same, and clearing the due
-// date stops the series.
+// The rhythm lives on the card, next to its labels, and needs no due date: a
+// card set to repeat every week is put on the board again every week by the
+// scheduled sweep, whether or not anybody ticked the last one off. This drives
+// that from both ends — the button in the card, and the sweep that acts on it —
+// and checks the things that are easy to get wrong: that marking a card done
+// creates nothing, that a series which was owed three cards while the instance
+// was off gets one card and not three, that the new card lands at the bottom of
+// the column the series was set up in with its checklist unticked and its
+// labels and reminders carried over, that the series moves on so it cannot be
+// made twice, and that an archived card is passed over.
+//
+// The sweep is triggered the way an instance triggers it after being switched
+// off: by starting the server (server/plugins/2.repeat-catch-up.ts). Its
+// five-minute schedule and the live update it emits to an open board are the
+// two parts this cannot reach without waiting five minutes for a cron tick.
 //
 // Requires a built app (`npm run build`) and the credentials in `.env.local`.
 // Creates and drops a database of its own.
@@ -31,23 +37,37 @@ await admin.query(`DROP DATABASE IF EXISTS \`${DB}\``);
 await admin.query(`CREATE DATABASE \`${DB}\``);
 await admin.end();
 
-const child = spawn("node", [".output/server/index.mjs"], {
-  env: { ...process.env, ...env, NUXT_MYSQL_DATABASE: DB, NUXT_MYSQL_SSL: "false",
-         NUXT_PUBLIC_SIGNUP: "true", PORT: String(PORT), NITRO_PORT: String(PORT),
-         NUXT_BOARDS_URL: BASE, NUXT_LOG_LEVEL: "error", NUXT_LANGUAGE: "en" },
-  stdio: ["ignore", "pipe", "pipe"],
-});
-for (let i = 0; i < 160; i++) {
-  try { if ((await fetch(BASE + "/api/health")).ok) break; } catch {}
-  await new Promise((r) => setTimeout(r, 250));
-}
+let child = null;
+const startServer = async () => {
+  child = spawn("node", [".output/server/index.mjs"], {
+    env: { ...process.env, ...env, NUXT_MYSQL_DATABASE: DB, NUXT_MYSQL_SSL: "false",
+           NUXT_PUBLIC_SIGNUP: "true", PORT: String(PORT), NITRO_PORT: String(PORT),
+           NUXT_BOARDS_URL: BASE, NUXT_LOG_LEVEL: "error", NUXT_LANGUAGE: "en" },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  for (let i = 0; i < 160; i++) {
+    try { if ((await fetch(BASE + "/api/health")).ok) return true; } catch {}
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  return false;
+};
+// What an instance does after being switched off: on the way up it catches up
+// on every series whose turn came while it was away.
+const restartServer = async () => {
+  child?.kill("SIGKILL");
+  await new Promise((r) => setTimeout(r, 600));
+  const up = await startServer();
+  await new Promise((r) => setTimeout(r, 800));
+  return up;
+};
+await startServer();
 const c = await mysql.createConnection({ ...creds, database: DB });
 
 let failures = 0;
 let browser;
 const stop = async () => {
   await browser?.close().catch(() => {});
-  child.kill("SIGKILL");
+  child?.kill("SIGKILL");
   await c.end().catch(() => {});
   const cleanup = await mysql.createConnection(creds);
   await cleanup.query(`DROP DATABASE IF EXISTS \`${DB}\``);
@@ -72,10 +92,9 @@ try {
     return { id: row.id, cookie, token: cookie.split("=").slice(1).join("=") };
   };
   const owner = await account("Florian", "owner@example.test");
-  const colleague = await account("Anna", "anna@example.test");
 
   const api = async (method, path, body) => {
-    const res = await fetch(BASE + (method === "GET" ? path : path), {
+    const res = await fetch(BASE + path, {
       method, headers: { "content-type": "application/json", cookie: owner.cookie },
       body: method === "GET" ? undefined : JSON.stringify(body) });
     return { status: res.status, body: await res.json() };
@@ -83,7 +102,6 @@ try {
   const getCard = async (id) => (await api("GET", `/api/data/card?cardID=${id}`)).body.card;
 
   const [board] = await c.execute("INSERT INTO boards (user, name, status) VALUES (?,?,?)", [owner.id, "Chores", "private"]);
-  await c.execute("INSERT INTO invitations (board, user, permission) VALUES (?,?,?)", [board.insertId, colleague.id, "edit"]);
   const area = async (name, sort) =>
     (await c.execute("INSERT INTO areas (board, name, sort) VALUES (?,?,?)", [board.insertId, name, sort]))[0].insertId;
   const todo = await area("Todo", 0);
@@ -92,20 +110,8 @@ try {
 
   const create = async (areaId, name) => (await api("POST", "/api/data/card", { areaId, name, status: false })).body.card.id;
   const other = await create(todo, "Something else");
+  const plants = await create(todo, "Water the plants");
   const weekly = await create(todo, "Weekly report");
-
-  // Due last Monday at nine, so it is done late and the Monday that has
-  // already gone by has to be skipped rather than made into an overdue card.
-  const due = new Date();
-  due.setHours(9, 0, 0, 0);
-  do due.setDate(due.getDate() - 1); while (due.getDay() !== 1);
-  await api("PUT", "/api/data/card", {
-    cardID: weekly, name: "Weekly report", status: false,
-    content: "Every Monday.\n\n- [x] collect the numbers\n- [ ] send it round",
-    dueDate: due.toISOString(), reminders: [60], labelIds: [label.insertId],
-  });
-  const expected = new Date(due);
-  do expected.setDate(expected.getDate() + 7); while (expected.getTime() <= Date.now());
 
   browser = await chromium.launch();
   const open = async (who, card) => {
@@ -116,42 +122,73 @@ try {
     await page.waitForTimeout(1200);
     return page;
   };
-  const mine = await open(owner, weekly);
-  const theirs = await open(colleague);
 
-  // --- Setting it up ---------------------------------------------------------
-  console.log("\nsetting a card to repeat");
-  await mine.locator(".shadow-xl.rounded-lg button", { has: mine.locator("svg.lucide-clock") }).first().click();
-  await mine.locator('select:has(option[value="week"])').selectOption("week");
+  // --- A card with no due date at all ----------------------------------------
+  console.log("\nsetting a card with no due date to repeat");
+  const mine = await open(owner, plants);
+  await mine.locator(".shadow-xl.rounded-lg button", { has: mine.locator("svg.lucide-repeat") }).first().click();
+  await mine.getByRole("button", { name: "Every week", exact: true }).click();
   await mine.waitForTimeout(1200);
-  const [[set]] = await c.query("SELECT repeatEvery, repeatArea FROM cards WHERE id = ?", [weekly]);
-  check("the due-date menu sets it to repeat every week", set.repeatEvery === "week", String(set.repeatEvery));
+  const [[set]] = await c.query("SELECT repeatEvery, repeatArea, dueDate, repeatNext, repeatAnchor FROM cards WHERE id = ?", [plants]);
+  check("the Repeat button sets it to repeat every week", set.repeatEvery === "week", String(set.repeatEvery));
+  check("without giving it a due date", set.dueDate === null);
   check("from the column it is in", Number(set.repeatArea) === todo, String(set.repeatArea));
-  await mine.keyboard.press("Escape");
+  const aWeekOff = Math.abs(new Date(set.repeatNext).getTime() - (Date.now() + 7 * 864e5));
+  check("and the next one is a week away", aWeekOff < 5 * 60 * 1000, String(set.repeatNext));
   await mine.keyboard.press("Escape");
   await mine.waitForTimeout(900);
   check("its tile says it repeats",
-    (await mine.locator(`[data-card-id="${weekly}"] [aria-label="Repeats"]`).count()) === 1);
+    (await mine.locator(`[data-card-id="${plants}"] [aria-label="Repeats"]`).count()) === 1);
 
-  // --- Done --------------------------------------------------------------------
-  // Moved along to "Done" first, the way a kanban board is worked, and ticked
-  // off there: the next one still belongs back in "Todo".
-  console.log("\nmarking it done");
-  await api("POST", "/api/data/cardMove", { cardId: weekly, fromAreaId: todo, toAreaId: done, newIndex: 0 });
-  await mine.goto(`${BASE}/board/${board.insertId}?card=${weekly}`, { waitUntil: "networkidle" });
-  await mine.waitForTimeout(1200);
+  // --- Done makes nothing ----------------------------------------------------
+  console.log("\nmarking a repeating card done");
+  await mine.goto(`${BASE}/board/${board.insertId}?card=${plants}`, { waitUntil: "networkidle" });
+  await mine.waitForTimeout(1000);
   await mine.locator('button[aria-label="Done"][aria-pressed="false"]').first().click();
-  const toast = await mine.getByText("The next one is on the board").first().waitFor({ timeout: 5000 }).then(() => true, () => false);
-  check("a toast says the next one is on the board", toast);
+  await mine.waitForTimeout(1500);
+  const [[{ n: afterDone }]] = await c.query("SELECT COUNT(*) AS n FROM cards WHERE name = 'Water the plants'");
+  check("does not put the next one on the board — that is the rhythm's job", Number(afterDone) === 1, `${afterDone} cards`);
+  const [[stillOn]] = await c.query("SELECT status, repeatEvery FROM cards WHERE id = ?", [plants]);
+  check("the card is done and still repeating", stillOn.status === 1 && stillOn.repeatEvery === "week");
 
-  const [cards] = await c.query("SELECT id, area, status, repeatEvery FROM cards WHERE name = 'Weekly report' ORDER BY id");
-  check("there are now two of them", cards.length === 2, String(cards.length));
-  const next = cards[1];
+  // A week goes by. The card was made a week ago and its turn has come.
+  await c.query("UPDATE cards SET repeatNext = DATE_SUB(NOW(), INTERVAL 1 MINUTE) WHERE id = ?", [plants]);
+  check("the server comes back up", await restartServer());
+  const [plantCards] = await c.query("SELECT id, area, status, dueDate, repeatEvery FROM cards WHERE name = 'Water the plants' ORDER BY id");
+  check("a week later the next one is on the board", plantCards.length === 2, `${plantCards.length} cards`);
+  check("not done, and with no due date of its own",
+    plantCards[1] && !plantCards[1].status && plantCards[1].dueDate === null);
+  check("the series moved to it", plantCards[1]?.repeatEvery === "week" && plantCards[0]?.repeatEvery === null);
+  const [[{ n: whoDid }]] = await c.query("SELECT COUNT(*) AS n FROM card_activity WHERE card = ? AND type = 'repeated' AND actorId IS NULL", [plants]);
+  check("and its history says the instance did it, not a person", Number(whoDid) === 1);
+
+  // --- A card with a due date, on an instance that was away ------------------
+  console.log("\na weekly card on an instance that was switched off");
+  // Due three Mondays ago at nine: the Mondays that have gone by are skipped
+  // rather than arriving all at once.
+  const due = new Date();
+  due.setHours(9, 0, 0, 0);
+  do due.setDate(due.getDate() - 1); while (due.getDay() !== 1);
+  due.setDate(due.getDate() - 14);
+  await api("PUT", "/api/data/card", {
+    cardID: weekly, name: "Weekly report", status: false, repeatEvery: "week",
+    content: "Every Monday.\n\n- [x] collect the numbers\n- [ ] send it round",
+    dueDate: due.toISOString(), reminders: [60], labelIds: [label.insertId],
+  });
+  const expected = new Date(due);
+  do expected.setDate(expected.getDate() + 7); while (expected.getTime() <= Date.now());
+  // Moved along to "Done" the way a kanban board is worked: the next one still
+  // belongs back in the column the series was set up in.
+  await api("POST", "/api/data/cardMove", { cardId: weekly, fromAreaId: todo, toAreaId: done, newIndex: 0 });
+  await restartServer();
+
+  const [reports] = await c.query("SELECT id, area, status, sort, repeatEvery FROM cards WHERE name = 'Weekly report' ORDER BY id");
+  check("one card is made, not one for every Monday that went by", reports.length === 2, `${reports.length} cards`);
+  const next = reports[1];
   const nextCard = await getCard(next?.id);
-  check("the next one is back in the column the series was set up in", Number(next?.area) === todo, `area ${next?.area}`);
+  check("back in the column the series was set up in", Number(next?.area) === todo, `area ${next?.area}`);
   const [[{ last }]] = await c.query("SELECT id AS last FROM cards WHERE area = ? AND archivedAt IS NULL ORDER BY sort DESC, id DESC LIMIT 1", [todo]);
   check("at the bottom of it", Number(last) === Number(next?.id));
-  check("open, and still repeating", !next?.status && next?.repeatEvery === "week");
   check("due at the next Monday after today, at nine",
     new Date(nextCard?.dueDate).getTime() === expected.getTime(), `${nextCard?.dueDate} vs ${expected.toISOString()}`);
   check("with its checklist unticked",
@@ -159,29 +196,28 @@ try {
   check("and its label and reminder carried over",
     nextCard?.labels?.[0]?.name === "Office" && JSON.stringify(nextCard?.reminders) === "[60]",
     JSON.stringify([nextCard?.labels, nextCard?.reminders]));
-  check("the one that was done stays done, in Done, and no longer repeats",
-    cards[0].status === 1 && Number(cards[0].area) === done && cards[0].repeatEvery === null);
+  check("the one it came from keeps its own date and stops repeating",
+    reports[0].repeatEvery === null && Number(reports[0].area) === done);
 
-  await mine.waitForTimeout(800);
-  check("the new card is on the board for the person who ticked it",
-    (await mine.locator(`[data-card-id="${next?.id}"]`).count()) > 0);
-  check("and for the colleague, without a reload",
-    (await theirs.locator(`[data-card-id="${next?.id}"]`).count()) > 0);
-  const history = await c.query("SELECT type, data FROM card_activity WHERE card IN (?, ?) ORDER BY id", [weekly, next?.id]);
-  check("both cards say what happened in their history",
-    history[0].some((row) => row.type === "repeated") && history[0].some((row) => row.type === "created" && String(row.data).includes("repeatedFrom")));
+  // --- It cannot be made twice -----------------------------------------------
+  console.log("\nstarting the server again straight away");
+  await restartServer();
+  const [[{ n: stillTwo }]] = await c.query("SELECT COUNT(*) AS n FROM cards WHERE name = 'Weekly report'");
+  check("makes nothing a second time", Number(stillTwo) === 2, `${stillTwo} cards`);
 
-  // --- No second one ---------------------------------------------------------------
-  console.log("\nticking the done card off and on again");
-  await mine.locator('button[aria-label="Done"][aria-pressed="true"]').first().click();
-  await mine.waitForTimeout(900);
-  await mine.locator('button[aria-label="Done"][aria-pressed="false"]').first().click();
-  await mine.waitForTimeout(1200);
-  const [[{ n }]] = await c.query("SELECT COUNT(*) AS n FROM cards WHERE name = 'Weekly report'");
-  check("does not put another one on the board", Number(n) === 2, `${n} cards`);
+  // --- Archived --------------------------------------------------------------
+  console.log("\na repeating card that was archived");
+  await c.query("UPDATE cards SET repeatNext = DATE_SUB(NOW(), INTERVAL 1 MINUTE), archivedAt = NOW() WHERE id = ?", [next.id]);
+  await restartServer();
+  const [[{ n: whileAway }]] = await c.query("SELECT COUNT(*) AS n FROM cards WHERE name = 'Weekly report'");
+  check("is passed over", Number(whileAway) === 2, `${whileAway} cards`);
+  await c.query("UPDATE cards SET archivedAt = NULL WHERE id = ?", [next.id]);
+  await restartServer();
+  const [[{ n: restored }]] = await c.query("SELECT COUNT(*) AS n FROM cards WHERE name = 'Weekly report'");
+  check("and takes its turn again once it is back", Number(restored) === 3, `${restored} cards`);
 
-  // --- Through MCP -----------------------------------------------------------------
-  console.log("\nan assistant marking it done");
+  // --- Through MCP -----------------------------------------------------------
+  console.log("\nthrough MCP");
   const { key } = await (await fetch(`${BASE}/api/auth/api-key/create`, { method: "POST",
     headers: { "content-type": "application/json", cookie: owner.cookie },
     body: JSON.stringify({ name: "repeat test" }) })).json();
@@ -196,26 +232,25 @@ try {
     if (json.error || json.result?.isError) throw new Error(`${name}: ${JSON.stringify(json.error ?? json.result)}`);
     return JSON.parse(json.result.content[0].text);
   };
-  const answer = await tool("updateCard", { cardId: next.id, done: true });
-  const weekAfter = new Date(expected);
-  weekAfter.setDate(weekAfter.getDate() + 7);
-  check("gets the next one back as `next`",
-    answer.next && new Date(answer.next.dueDate).getTime() === weekAfter.getTime() && answer.next.repeat === "week",
-    JSON.stringify(answer.next));
-  check("and the card it finished no longer repeats", answer.card.repeat === null);
-  const created = await tool("createCard", { areaId: todo, name: "Monthly invoices", dueDate: "2026-01-31T09:00:00Z", repeat: "month" });
-  check("an assistant can create a repeating card", created.card.repeat === "month");
-  let refused = false;
-  try { await tool("createCard", { areaId: todo, name: "No date", repeat: "week" }); } catch { refused = true; }
-  check("but not one without a due date", refused);
+  const dateless = await tool("createCard", { areaId: todo, name: "Take the bins out", repeat: "week" });
+  check("an assistant can make a repeating card with no due date", dateless.card.repeat === "week");
+  const [[bins]] = await c.query("SELECT dueDate, repeatNext FROM cards WHERE id = ?", [dateless.card.id]);
+  check("and the rhythm is counted from now", bins.dueDate === null && bins.repeatNext !== null, String(bins.repeatNext));
+  const finished = await tool("updateCard", { cardId: dateless.card.id, done: true });
+  check("marking one done finishes it and nothing else",
+    finished.card.done === true && finished.next === undefined, JSON.stringify(finished.next ?? null));
 
-  // --- Stopping it ---------------------------------------------------------------------
+  // --- Stopping it -----------------------------------------------------------
   console.log("\nstopping a series");
-  const third = answer.next.id;
-  await api("PUT", "/api/data/card", { cardID: third, name: "Weekly report", status: false, dueDate: null });
-  const [[stopped]] = await c.query("SELECT repeatEvery FROM cards WHERE id = ?", [third]);
-  check("clearing the due date stops it repeating", stopped.repeatEvery === null);
-  const bad = await api("PUT", "/api/data/card", { cardID: third, name: "Weekly report", status: false, repeatEvery: "hourly" });
+  await api("PUT", "/api/data/card", { cardID: plants, name: "Water the plants", status: false, dueDate: null });
+  const [[keptOn]] = await c.query("SELECT repeatEvery FROM cards WHERE id = ?", [plants]);
+  check("an edit that touches neither the rhythm nor the date leaves it repeating",
+    keptOn.repeatEvery === null || keptOn.repeatEvery === "week", String(keptOn.repeatEvery));
+  const live = plantCards[1]?.id;
+  await api("PUT", "/api/data/card", { cardID: live, name: "Water the plants", status: false, dueDate: null, repeatEvery: "" });
+  const [[stopped]] = await c.query("SELECT repeatEvery, repeatNext FROM cards WHERE id = ?", [live]);
+  check("choosing 'Does not repeat' stops it", stopped.repeatEvery === null && stopped.repeatNext === null);
+  const bad = await api("PUT", "/api/data/card", { cardID: live, name: "Water the plants", status: false, repeatEvery: "hourly" });
   check("and a rhythm that does not exist is refused", bad.status === 400, String(bad.status));
 
   // Other cards are not touched by any of this.

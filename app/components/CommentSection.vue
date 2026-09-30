@@ -421,15 +421,19 @@ const activityText = (a: any): string => {
                   })
                 : $t("activityRepeatCleared");
         case "repeated":
-            return $t("activityRepeated", {
-                date: formatServerDate(d.dueDate, {
-                    day: "2-digit",
-                    month: "2-digit",
-                    year: "numeric",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                }),
-            });
+            // A repeating card need not be due at a time, and then there is no
+            // date to name.
+            return d.dueDate
+                ? $t("activityRepeated", {
+                      date: formatServerDate(d.dueDate, {
+                          day: "2-digit",
+                          month: "2-digit",
+                          year: "numeric",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                      }),
+                  })
+                : $t("activityRepeatedNoDate");
         case "archived":
             return $t("activityArchived");
         case "restored":

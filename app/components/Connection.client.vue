@@ -21,6 +21,7 @@ const emits = defineEmits([
     "card-deleted",
     "comment-count-updated",
     "presence-updated",
+    "map-moved",
 ]);
 
 const isThisBoard = (boardId) => props.boardID * 1 === boardId * 1;
@@ -53,6 +54,11 @@ const onUpdateBoard = ({
             boardImage,
             boardColor,
         });
+};
+
+// A branch of the mind map was dragged somewhere else.
+const onMovedMap = ({ boardId, nodes }) => {
+    if (isThisBoard(boardId)) emits("map-moved", { boardId, nodes });
 };
 
 // Somebody was invited to this board or taken off it.
@@ -135,6 +141,7 @@ socket.on("addArea", onAddArea);
 socket.on("updateArea", onUpdateArea);
 socket.on("deleteArea", onDeleteArea);
 socket.on("commentCountUpdated", onCommentCountUpdated);
+socket.on("movedMap", onMovedMap);
 socket.on("cardPresence", onCardPresence);
 socket.on("boardPresence", onBoardPresence);
 

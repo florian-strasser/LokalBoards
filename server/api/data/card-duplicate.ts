@@ -101,7 +101,7 @@ export default defineEventHandler(async (event) => {
     // in the order they said it, and they belong to the card they were written
     // on.
     const [inserted]: any = await db.execute(
-      "INSERT INTO cards (area, name, content, status, sort, dueDate, repeatEvery, repeatAnchor, repeatArea) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO cards (area, name, content, status, sort, dueDate, repeatEvery, repeatAnchor, repeatArea, repeatNext) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       [
         original.area,
         original.name,
@@ -112,6 +112,7 @@ export default defineEventHandler(async (event) => {
         original.repeatEvery || null,
         original.repeatAnchor || null,
         original.repeatArea ?? null,
+        original.repeatNext || null,
       ],
     );
     const newCardId = inserted.insertId;

@@ -200,12 +200,18 @@
                         writeAccess ||
                         dueDate ||
                         assignees.length ||
-                        cardLabels.length
+                        cardLabels.length ||
+                        repeatEvery
                     "
                     class="mb-4"
                 >
                     <div
-                        v-if="writeAccess || dueDate || assignees.length"
+                        v-if="
+                            writeAccess ||
+                            dueDate ||
+                            assignees.length ||
+                            repeatEvery
+                        "
                         class="flex flex-wrap items-center gap-2"
                     >
                         <!-- Due date -->
@@ -218,11 +224,6 @@
                                             ? formatDateTime(dueDate)
                                             : $t("dueDate")
                                     }}</span>
-                                    <Repeat
-                                        v-if="dueDate && repeatEvery"
-                                        class="size-4 shrink-0"
-                                        :aria-label="$t(repeatLabel)"
-                                    />
                                 </button>
                             </template>
                             <template #default>
@@ -283,30 +284,6 @@
                                             </option>
                                         </select>
                                     </div>
-                                    <!-- How it repeats. A property of the due
-                                         date: marking the card done puts the
-                                         next one on the board, due at the next
-                                         date in the series. -->
-                                    <div v-if="dueDate">
-                                        <label
-                                            class="block text-sm font-bold text-dark dark:text-white mb-1"
-                                        >
-                                            {{ $t("repeat") }}
-                                        </label>
-                                        <select
-                                            v-model="repeatEvery"
-                                            @change="saveCard"
-                                            class="form-control text-sm"
-                                        >
-                                            <option
-                                                v-for="option in REPEAT_OPTIONS"
-                                                :key="option.value"
-                                                :value="option.value"
-                                            >
-                                                {{ $t(option.label) }}
-                                            </option>
-                                        </select>
-                                    </div>
                                     <button
                                         v-if="dueDate"
                                         type="button"
@@ -322,11 +299,6 @@
                         <div v-else-if="dueDate" :class="chipClass(true)">
                             <Clock class="size-4 shrink-0" />
                             <span>{{ formatDateTime(dueDate) }}</span>
-                            <Repeat
-                                v-if="repeatEvery"
-                                class="size-4 shrink-0"
-                                :aria-label="$t(repeatLabel)"
-                            />
                         </div>
 
                         <!-- Who is on it. A card can be on several people,
@@ -437,6 +409,70 @@
                             @labels-changed="emits('labels-changed')"
                             @changed="saveCard"
                         />
+
+                        <!-- How often it comes back. Its own button rather
+                             than something inside the due date, because a card
+                             can repeat without ever being due: the rhythm is
+                             what brings the next one, and the due date only
+                             says when that one is wanted by. -->
+                        <PopoverMenu v-if="writeAccess">
+                            <template #trigger>
+                                <button
+                                    type="button"
+                                    :class="chipClass(!!repeatEvery)"
+                                >
+                                    <Repeat class="size-4 shrink-0" />
+                                    <span>{{
+                                        repeatEvery
+                                            ? $t(repeatLabel)
+                                            : $t("repeat")
+                                    }}</span>
+                                </button>
+                            </template>
+                            <template #default="{ close }">
+                                <div class="w-60">
+                                    <ul class="space-y-0.5">
+                                        <li
+                                            v-for="option in REPEAT_OPTIONS"
+                                            :key="option.value"
+                                        >
+                                            <button
+                                                type="button"
+                                                @click="
+                                                    setRepeat(option.value);
+                                                    close();
+                                                "
+                                                class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-dark hover:bg-primary/10 dark:text-white dark:hover:bg-white/10"
+                                            >
+                                                <span class="grow">{{
+                                                    $t(option.label)
+                                                }}</span>
+                                                <Check
+                                                    v-if="
+                                                        repeatEvery ===
+                                                        option.value
+                                                    "
+                                                    class="size-4 shrink-0 text-primary"
+                                                />
+                                            </button>
+                                        </li>
+                                    </ul>
+                                    <p
+                                        v-if="repeatEvery"
+                                        class="text-gray mt-2 border-t border-dark/10 pt-2 text-xs dark:border-white/10"
+                                    >
+                                        {{ $t("repeatHint") }}
+                                    </p>
+                                </div>
+                            </template>
+                        </PopoverMenu>
+                        <div
+                            v-else-if="repeatEvery"
+                            :class="chipClass(true)"
+                        >
+                            <Repeat class="size-4 shrink-0" />
+                            <span>{{ $t(repeatLabel) }}</span>
+                        </div>
                     </div>
                     <CardLabels
                         v-model="cardLabels"
@@ -834,10 +870,16 @@ const formatDateTime = (iso) =>
         minute: "2-digit",
     });
 
-// Without a due date there is nothing to repeat, so the rhythm goes with it.
+// The due date goes; the rhythm stays. A card that repeats every Monday goes on
+// repeating every Monday, it just stops being due at a time.
 const clearDueDate = () => {
     dueDate.value = "";
-    repeatEvery.value = "";
+    saveCard();
+};
+
+const setRepeat = (every) => {
+    if (repeatEvery.value === every) return;
+    repeatEvery.value = every;
     saveCard();
 };
 
@@ -1228,16 +1270,9 @@ const saveCard = async () => {
                 labelIds: cardLabels.value.map((label) => label.id),
             },
         });
-        // A repeating card that was just marked done has handed its rhythm on
-        // to the next one, which the server has already put on the board.
+        // The server decides what the card repeats as — it is the one that
+        // knows whether the rhythm survived the edit.
         repeatEvery.value = response.card?.repeatEvery || "";
-        if (response.next) {
-            await nuxtApp.callHook("app:toast", {
-                message: $t("repeatNextCreated", {
-                    date: formatDateTime(response.next.dueDate),
-                }),
-            });
-        }
         // Update the attachments list with the new attachments
         if (response.attachments) {
             attachments.value = [...attachments.value, ...response.attachments];

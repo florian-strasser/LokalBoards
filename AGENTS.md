@@ -39,8 +39,9 @@ await client.connect(transport);
 - A **board** contains ordered **areas** (columns/lists).
 - An **area** contains ordered **cards** (tasks).
 - A **card** has a name, a Markdown `content` (description), a `done` flag, an
-  optional `dueDate` (which can repeat), the people on it (`assigneeIds`, with
-  `assigneeId` as the first of them), plus **comments** and **attachments**.
+  optional `dueDate`, how often it comes back (`repeat`), the people on it
+  (`assigneeIds`, with `assigneeId` as the first of them), plus **comments**
+  and **attachments**.
 
 Ids are integers returned by the list/get tools. Positions are 0-based.
 
@@ -66,7 +67,7 @@ searchCards({ areaId: <to-do column>, done: false, unassigned: true })
   → claimCard(cardId)          # atomic: skip the card if claimed === false
   → …do the work…
   → writeComment(cardId, "<what you did>")
-  → updateCard({ cardId, done: true })   # a repeating card returns the next one as `next`
+  → updateCard({ cardId, done: true })
   → moveCard({ cardId, toAreaId: <done column> })
 ```
 
@@ -82,6 +83,10 @@ searchCards({ areaId: <to-do column>, done: false, unassigned: true })
   humans looking at the board.
 - **Retrying a create?** Pass an `idempotencyKey` so a repeat returns the card
   you already made instead of a duplicate.
+- **A repeating card comes back on its own.** The server puts the next one on
+  the board each time the rhythm comes round, whether or not this one was
+  marked done — so finishing a card is all you do, and a card you find waiting
+  may be this week's rather than one nobody touched.
 
 ## Staying up to date
 

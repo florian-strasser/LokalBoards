@@ -5,7 +5,6 @@ import { dispatchWebhooks } from "../../utils/webhooks";
 import { getServerSocket } from "../../utils/socket";
 import { nextCardSort } from "../../utils/cardPositions";
 import { isRepeatEvery, repeatAfterEdit } from "../../utils/repeat";
-import { repeatCard } from "../../utils/repeatCard";
 import {
   assigneeIdsFrom,
   attachAssignees,
@@ -331,7 +330,7 @@ export default defineEventHandler(async (event) => {
 
         // Update the card
         await db.execute(
-          "UPDATE cards SET name = ?, content = ?, status = ?, dueDate = ?, repeatEvery = ?, repeatAnchor = ?, repeatArea = ? WHERE id = ?",
+          "UPDATE cards SET name = ?, content = ?, status = ?, dueDate = ?, repeatEvery = ?, repeatAnchor = ?, repeatArea = ?, repeatNext = ? WHERE id = ?",
           [
             name,
             content || "",
@@ -340,6 +339,7 @@ export default defineEventHandler(async (event) => {
             repeat.repeatEvery,
             repeat.repeatAnchor,
             repeat.repeatArea,
+            repeat.repeatNext,
             cardID,
           ],
         );
@@ -508,13 +508,6 @@ export default defineEventHandler(async (event) => {
           }
         }
 
-        // Done, and a repeating card: the next one goes on the board now, so the
-        // card read back below is already the one that no longer repeats.
-        const next =
-          !originalStatus && newStatus
-            ? await repeatCard(db, Number(cardID), userId)
-            : null;
-
         // Handle file uploads if present
         let newAttachments = [];
         if (files && Array.isArray(files)) {
@@ -639,7 +632,7 @@ export default defineEventHandler(async (event) => {
           card: { id: card?.id, name: card?.name, done: !!card?.status },
         });
 
-        return { card, attachments, next };
+        return { card, attachments };
       }
     } else if (method === "DELETE") {
       // Handle DELETE request: archives the card, or removes it for good when

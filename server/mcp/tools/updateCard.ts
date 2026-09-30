@@ -10,7 +10,6 @@ import {
   boardMemberIds,
   setCardAssignees,
 } from "../../utils/cardAssignees";
-import { repeatCard } from "../../utils/repeatCard";
 import {
   requireUserId,
   requireWriteAccess,
@@ -27,7 +26,7 @@ export default defineMcpTool({
   name: "updateCard",
   title: "Update a card",
   description:
-    "Update fields of an existing card. Only the fields you pass are changed (partial update); pass at least one. `content` is Markdown. Set `dueDate` to an empty string to clear it. `assigneeIds` sets everyone on the card (a card can be on several people; [] takes everybody off). Marking a repeating card done creates the next one, returned as `next`. Needs edit access to the board.",
+    "Update fields of an existing card. Only the fields you pass are changed (partial update); pass at least one. `content` is Markdown. Set `dueDate` to an empty string to clear it. `assigneeIds` sets everyone on the card (a card can be on several people; [] takes everybody off). Needs edit access to the board.",
   annotations: {
     readOnlyHint: false,
     idempotentHint: true,
@@ -67,7 +66,7 @@ export default defineMcpTool({
       .enum(["day", "week", "twoWeeks", "month", "year", ""])
       .optional()
       .describe(
-        "Make the card repeat: once it is marked done, the next one is created with its checklist unticked and the next due date in the series. Needs a due date. Pass '' to stop it repeating.",
+        "Make the card repeat: each time the rhythm comes round the next card is created on its own, with its checklist unticked — whether or not this one was done. A due date is optional; with one, the next card is made as that date arrives and is due a rhythm later. Pass '' to stop it repeating.",
       ),
   },
   inputExamples: [
@@ -158,12 +157,6 @@ export default defineMcpTool({
           : dueDate === ""
             ? null
             : new Date(dueDate);
-      if (repeat && !due) {
-        throw new McpError(
-          "VALIDATION",
-          "A card needs a due date to repeat. Pass dueDate as well.",
-        );
-      }
       const before = card.dueDate ? new Date(card.dueDate).getTime() : null;
       const state = repeatAfterEdit(
         card,
@@ -171,8 +164,18 @@ export default defineMcpTool({
         due,
         dueDate !== undefined && (due ? due.getTime() : null) !== before,
       );
-      fields.push("repeatEvery = ?", "repeatAnchor = ?", "repeatArea = ?");
-      values.push(state.repeatEvery, state.repeatAnchor, state.repeatArea);
+      fields.push(
+        "repeatEvery = ?",
+        "repeatAnchor = ?",
+        "repeatArea = ?",
+        "repeatNext = ?",
+      );
+      values.push(
+        state.repeatEvery,
+        state.repeatAnchor,
+        state.repeatArea,
+        state.repeatNext,
+      );
     }
 
     if (fields.length === 0 && people === null) {
@@ -196,11 +199,6 @@ export default defineMcpTool({
         [id],
       );
     }
-
-    // Done, and a repeating card: the next one goes on the board, and the card
-    // read back below is the one that no longer repeats.
-    const next =
-      doneVal && !card.status ? await repeatCard(db, id, userId) : null;
 
     const [rows]: any = await db.execute("SELECT * FROM cards WHERE id = ?", [
       id,
@@ -253,7 +251,6 @@ export default defineMcpTool({
 
     return jsonResult({
       card: serializeCard(updatedCard),
-      ...(next ? { next: serializeCard(next) } : {}),
     });
   },
 });

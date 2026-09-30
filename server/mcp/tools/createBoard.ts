@@ -19,9 +19,11 @@ export default defineMcpTool({
   inputSchema: {
     name: z.string().min(1).describe("The board name."),
     style: z
-      .enum(["kanban", "todo"])
+      .enum(["kanban", "todo", "mindmap"])
       .optional()
-      .describe("Layout: 'kanban' (default) or 'todo'."),
+      .describe(
+        "Layout: 'kanban' (default), 'todo' or 'mindmap' (areas and cards placed freely on a canvas).",
+      ),
     status: z
       .enum(["private", "public"])
       .optional()

@@ -430,6 +430,19 @@ export default defineNitroPlugin((nitroApp: NitroApp) => {
       });
     });
 
+    // A branch of the mind map was dragged somewhere else. The mover has
+    // already saved it; this is only so the other boards move it too.
+    socket.on("mapMoved", async ({ boardId, nodes }) => {
+      if (!(await canAccessBoard(socket, boardId))) return;
+      if (!Array.isArray(nodes) || !nodes.length) return;
+      logger.debug(
+        `${nodes.length} Knoten wurden auf der Mindmap von Board ${boardId} verschoben (user-${socket.id})`,
+      );
+      io.except(`user-${socket.id}`)
+        .to(`board-${boardId}`)
+        .emit("movedMap", { boardId, nodes });
+    });
+
     // CardDeleted
     socket.on("cardDeleted", async ({ boardId, card }) => {
       if (!(await canAccessBoard(socket, boardId))) return;

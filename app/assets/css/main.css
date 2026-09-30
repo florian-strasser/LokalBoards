@@ -1030,3 +1030,169 @@ button.label-pill:focus-visible,
         );
     }
 }
+
+/* --- The mind-map layout ---------------------------------------------------
+   A board drawn as a tree on a plane: the board's title in the middle, its
+   areas around it, their cards around those. The plane is one transformed
+   element and every node is placed on it in plane coordinates, so panning and
+   zooming are one transform rather than a position recalculated per node.
+
+   `touch-action: none` is what makes a finger drag a node instead of scrolling
+   the page underneath it — the gestures here are handled from pointer events,
+   including the two-finger pinch, and the browser must not also act on them.
+
+   The map is not cut off at the edge of this box: it runs on up behind the
+   board's title and the header, which sit above it (see the board page), the
+   way a canvas runs on under a toolbar. It has the page's own ground, so there
+   is no edge to see. */
+.mindmap-viewport {
+    position: relative;
+    height: 100%;
+    width: 100%;
+    overflow: visible;
+    touch-action: none;
+    cursor: grab;
+}
+.mindmap-panning {
+    cursor: grabbing;
+}
+.mindmap-plane {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform-origin: 0 0;
+    will-change: transform;
+}
+.mindmap-lines {
+    position: absolute;
+    overflow: visible;
+    pointer-events: none;
+}
+.mindmap-line {
+    fill: none;
+    stroke: color-mix(in oklab, var(--color-primary) 45%, transparent);
+    stroke-width: 2;
+    stroke-linecap: round;
+}
+/* Every node is placed by its centre, which is what the layout works in and
+   what keeps a line pointing at the middle of the thing it joins. */
+.mindmap-node {
+    position: absolute;
+    transform: translate(-50%, -50%);
+}
+.mindmap-draggable {
+    cursor: grab;
+}
+.mindmap-dragging {
+    cursor: grabbing;
+    opacity: 0.85;
+}
+/* `width: max-content` is what keeps the board's name on one line. An
+   absolutely positioned box is sized to its content's *minimum* otherwise,
+   which for a title is one letter per line. */
+.mindmap-root {
+    width: max-content;
+    max-width: 22rem;
+    border-radius: 9999px;
+    background-color: var(--color-primary);
+    padding: 0.75rem 1.5rem;
+    text-align: center;
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--color-white);
+    box-shadow: 0 10px 25px -10px rgb(0 0 0 / 0.45);
+    overflow-wrap: break-word;
+}
+/* The bottom padding is the room the round + sits in, half on the node and
+   half off it. */
+.mindmap-area {
+    width: 17rem;
+    border-radius: 0.75rem;
+    background-color: var(--color-white);
+    padding: 0.75rem 0.75rem 1.75rem;
+    box-shadow: 0 8px 20px -12px rgb(0 0 0 / 0.4);
+}
+/* The whole area is what you take hold of, name included — until the name is
+   being typed in, when it is text again. */
+.mindmap-draggable input:not(:focus) {
+    cursor: inherit;
+}
+.mindmap-add-card {
+    position: absolute;
+    left: 50%;
+    bottom: 0;
+    transform: translate(-50%, 50%);
+    display: flex;
+    height: 2.25rem;
+    width: 2.25rem;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9999px;
+    background-color: var(--color-primary);
+    color: var(--color-white);
+}
+.mindmap-add-card:hover {
+    background-color: var(--color-primary-hover);
+}
+/* A card on the map is its title and nothing else. */
+.mindmap-card {
+    width: max-content;
+    max-width: 15rem;
+}
+.mindmap-card-title {
+    display: block;
+    width: 100%;
+    border-radius: 0.5rem;
+    background-color: var(--color-white);
+    padding: 0.5rem 0.75rem;
+    text-align: left;
+    font-size: 0.875rem;
+    font-weight: 700;
+    color: var(--color-dark);
+    box-shadow: 0 6px 16px -10px rgb(0 0 0 / 0.45);
+    overflow-wrap: break-word;
+    cursor: inherit;
+}
+.mindmap-unread {
+    box-shadow:
+        0 0 0 2px var(--color-primary),
+        0 6px 16px -10px rgb(0 0 0 / 0.45);
+}
+.mindmap-tools {
+    position: absolute;
+    right: 1rem;
+    bottom: 1rem;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 0.5rem;
+}
+.mindmap-tool {
+    display: flex;
+    height: 2.5rem;
+    width: 2.5rem;
+    align-items: center;
+    justify-content: center;
+    gap: 0.25rem;
+    border-radius: 0.5rem;
+    background-color: var(--color-white);
+    color: var(--color-dark);
+    box-shadow: 0 6px 16px -10px rgb(0 0 0 / 0.45);
+}
+.mindmap-tool-wide {
+    width: auto;
+    padding: 0 0.75rem;
+}
+.mindmap-tool:hover {
+    background-color: var(--color-primary);
+    color: var(--color-white);
+}
+
+@media (prefers-color-scheme: dark) {
+    .mindmap-area,
+    .mindmap-card-title,
+    .mindmap-tool {
+        background-color: var(--color-slate);
+        color: var(--color-white);
+    }
+}
