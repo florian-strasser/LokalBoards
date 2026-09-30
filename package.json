@@ -61,7 +61,8 @@
     "postcss": "^8.5.25",
     "qs": "^6.15.4",
     "minimatch@10": "^10.2.6",
-    "engine.io": "^6.6.11"
+    "engine.io": "^6.6.11",
+    "dompurify": "^3.4.16"
   },
   "devDependencies": {
     "@nuxt/test-utils": "^4.3.2",
