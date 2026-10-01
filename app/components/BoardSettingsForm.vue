@@ -19,7 +19,7 @@
         <div>
             <InputColor :label="$t('boardColor')" v-model="color" />
         </div>
-        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div class="grid grid-cols-1 gap-4">
             <div>
                 <label class="mb-1 block text-sm/6 font-medium text-gray">{{
                     $t("boardStyle")

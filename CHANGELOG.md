@@ -1,3 +1,9 @@
+## v0.40.1
+
+### Fixes
+
+- **The layout choice has its row back.** With Mind-Map as a third layout, **Style** no longer fitted beside **Status** in the dialogs for a new board and a board's options: the three were cut down to "Ka…", "To…" and "Mi…". Style now takes the whole row and Status sits below it, in both dialogs.
+
 ## v0.40.0
 
 ### New Features
