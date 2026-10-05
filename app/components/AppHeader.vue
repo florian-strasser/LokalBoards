@@ -1,6 +1,20 @@
 <script setup lang="ts">
 import { UsersRound, LogOut, UserRoundPen, Search } from "lucide-vue-next";
 
+// On a board drawn as a mind map the canvas runs on behind the header. There
+// the header floats above it: it is lifted over the map, and only the logo,
+// the search and the nav pill take a press — the space between them lets one
+// through to whatever on the map is under it. The three carry
+// `pointer-events-auto` for that, which changes nothing anywhere else.
+//
+// It is the <header> that floats, not something wrapped around this component:
+// the search dialog below is this component's too, and inside a lifted wrapper
+// it was lifted no higher than the board's title, which then showed on top of
+// the dialog's backdrop.
+const props = defineProps({
+    floating: { type: Boolean, default: false },
+});
+
 const { data: session } = await useFetch("/api/auth/get-session");
 const handleLogout = async () => {
     await useFetch("/api/auth/sign-out", { method: "POST" });
@@ -20,13 +34,17 @@ const openSearch = () => {
 </script>
 <template>
     <ImpersonationBanner />
-    <header v-if="session" class="w-full pt-6">
+    <header
+        v-if="session"
+        class="w-full pt-6"
+        :class="{ 'relative z-20 pointer-events-none': props.floating }"
+    >
         <div
             class="container mx-auto flex flex-wrap items-center justify-between gap-y-3"
         >
             <NuxtLinkLocale
                 to="/dashboard/"
-                class="text-primary hover:text-primary-hover cursor-pointer block"
+                class="text-primary hover:text-primary-hover cursor-pointer block pointer-events-auto"
             >
                 <Logo />
             </NuxtLinkLocale>
@@ -49,10 +67,10 @@ const openSearch = () => {
                  and the dialog then gives the field and its results more room
                  than the header ever had. -->
             <GlobalSearch
-                class="hidden sm:mx-8 sm:block sm:w-auto sm:min-w-0 sm:max-w-[var(--search-max,28rem)] sm:flex-1"
+                class="pointer-events-auto hidden sm:mx-8 sm:block sm:w-auto sm:min-w-0 sm:max-w-[var(--search-max,28rem)] sm:flex-1"
             />
             <ul
-                class="relative flex gap-x-4 menu app-nav px-6 py-4 rounded-full bg-white dark:bg-slate"
+                class="pointer-events-auto relative flex gap-x-4 menu app-nav px-6 py-4 rounded-full bg-white dark:bg-slate"
             >
                 <li class="sm:hidden">
                     <button

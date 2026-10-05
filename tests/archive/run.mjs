@@ -193,6 +193,13 @@ try {
   await page.waitForTimeout(1200);
   check("and restoring from it puts the card back on the board",
     (await cardsIn(keep.insertId)).includes("Findable card"));
+  // On the board in front of them, that is — not only in the database. The
+  // reload behind this used to fetch the areas and then show each one's cards
+  // from what the page already held, so the card came back on the next visit.
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(600);
+  check("where it can be seen straight away, without a reload",
+    (await page.locator("[data-card-id]", { hasText: "Findable card" }).count()) === 1);
 } catch (error) {
   console.error(`\n FAIL  the run stopped early — ${error.message.split("\n")[0]}`);
   failures++;

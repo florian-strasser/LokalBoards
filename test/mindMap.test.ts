@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   AREA_RING,
+  MAP_FLATTEN,
   clampToMap,
   layoutAreas,
   layoutCards,
@@ -12,22 +13,44 @@ import {
 // itself, and that a place survives a reload and a change of layout, is driven
 // end to end by tests/mind-map/run.mjs.
 
+// How far above and below the root the first ring reaches, as the layout rounds it.
+const RING_Y = Math.round(AREA_RING * MAP_FLATTEN);
+
 const distance = (a: { x: number; y: number }, b: { x: number; y: number }) =>
   Math.hypot(a.x - b.x, a.y - b.y);
 
 describe("layoutAreas", () => {
   it("puts the first area above the root and goes round from there", () => {
     const [first, second, third, fourth] = layoutAreas(4);
-    expect([first!.x, first!.y]).toEqual([0, -AREA_RING]);
+    expect([first!.x, first!.y]).toEqual([0, -RING_Y]);
     expect(second!.x).toBeGreaterThan(0); // clockwise: right, then below
     expect(third!.y).toBeGreaterThan(0);
     expect(fourth!.x).toBeLessThan(0);
   });
 
-  it("keeps every area the same distance from the root", () => {
-    const ring = layoutAreas(5);
-    const radii = ring.map((area) => Math.round(distance(area, { x: 0, y: 0 })));
-    expect(new Set(radii).size).toBe(1);
+  it("spreads them round an oval, wider than it is tall", () => {
+    // A node is much wider than it is high, and so is the pane the map opens
+    // in at full size: the area above the board's name has to be in it.
+    const [top, right, bottom, left] = layoutAreas(4);
+    expect(right!.x).toBe(AREA_RING);
+    expect(left!.x).toBe(-AREA_RING);
+    expect(bottom!.y).toBe(-top!.y);
+    expect(Math.abs(top!.y)).toBeLessThan(AREA_RING * 0.6);
+  });
+
+  it("keeps neighbours off each other at every size of board", () => {
+    // An area is 272px wide and about 72px high. Two of them overlap only if
+    // they are closer than that both ways at once.
+    for (let count = 1; count <= 24; count++) {
+      const ring = layoutAreas(count);
+      ring.forEach((area, index) => {
+        const next = ring[(index + 1) % ring.length]!;
+        if (next === area) return;
+        const apart =
+          Math.abs(area.x - next.x) >= 272 || Math.abs(area.y - next.y) >= 72;
+        expect(apart, `${count} areas, ${index} and its neighbour`).toBe(true);
+      });
+    }
   });
 
   it("draws a wider circle rather than a crowded one", () => {
@@ -45,7 +68,7 @@ describe("layoutAreas", () => {
 });
 
 describe("layoutCards", () => {
-  const area = { x: 0, y: -AREA_RING, angle: -Math.PI / 2 };
+  const area = { x: 0, y: -RING_Y, angle: -Math.PI / 2 };
 
   it("fans the cards away from the middle of the map", () => {
     const cards = layoutCards(area, 3);
@@ -77,7 +100,9 @@ describe("placeMap", () => {
     expect(map.root).toEqual({ x: 0, y: 0 });
     expect(Object.keys(map.areas)).toEqual(["7", "8"]);
     expect(Object.keys(map.cards)).toEqual(["1", "2", "3"]);
-    expect(distance(map.areas[7]!, map.root)).toBeCloseTo(AREA_RING, 0);
+    // The first of two sits straight above the root, the other straight below.
+    expect(map.areas[7]).toEqual({ x: 0, y: -RING_Y });
+    expect(map.areas[8]).toEqual({ x: 0, y: RING_Y });
   });
 
   it("leaves what somebody dragged exactly where they put it", () => {
@@ -92,7 +117,7 @@ describe("placeMap", () => {
     expect(map.areas[7]).toEqual({ x: -40, y: 900 });
     expect(map.cards[1]).toEqual({ x: 12, y: -34 });
     // The area that was not dragged hangs off the root wherever the root is.
-    expect(distance(map.areas[8]!, map.root)).toBeCloseTo(AREA_RING, 0);
+    expect(map.areas[8]).toEqual({ x: 100, y: 100 + RING_Y });
   });
 
   it("fans a new card off its area even when the area was dragged", () => {

@@ -25,24 +25,31 @@ export interface LaidOutArea extends MapNode {
 }
 
 // Nodes this far apart do not overlap at the sizes the map draws them: an area
-// is 17rem wide and a card 16rem, so two of them centred less than about 280px
-// apart are on top of each other whatever the angle between them.
+// is 17rem wide and a card's title up to 15rem, so two of them centred less than
+// about 280px apart sideways are on top of each other.
 export const AREA_RING = 420; // from the root to the first ring of areas
 export const AREA_GAP = 320; // added per area once a ring is full
 export const CARD_RING = 360; // from an area to its cards
 export const CARD_SPREAD = Math.PI / 2.2; // the fan a card list opens into
 
+// The rings are ovals, wider than they are tall. A node is several times as
+// wide as it is high, so it needs far less room above and below than to either
+// side — and the map opens at its real size in a pane that is wider than it is
+// tall, where a round ring put the area above the board's name out of the pane
+// altogether, behind the header. Flattened, the first ring is all in view on a
+// laptop-sized window, which is the point of opening at a size you can read.
+export const MAP_FLATTEN = 0.55;
+
 const round = (n: number) => Math.round(n);
 
 /**
- * The areas around the root, evenly spaced on a circle wide enough for them.
- * The first area sits above the root and the rest go clockwise, so a board
- * with two or three areas reads left to right like the columns it came from.
+ * The areas around the root, evenly spaced round an oval wide enough for them.
+ * The first area sits above the root and the rest go clockwise.
  */
 export function layoutAreas(count: number): LaidOutArea[] {
   if (count <= 0) return [];
   // Enough circumference that neighbours keep their distance; a board with
-  // twelve areas draws a wider circle rather than a crowded one.
+  // twelve areas draws a wider ring rather than a crowded one.
   const radius = Math.max(AREA_RING, (count * AREA_GAP) / (2 * Math.PI));
   return Array.from({ length: count }, (_, index) => {
     const angle = -Math.PI / 2 + (index * 2 * Math.PI) / count;
@@ -50,7 +57,7 @@ export function layoutAreas(count: number): LaidOutArea[] {
       id: index,
       angle,
       x: round(Math.cos(angle) * radius),
-      y: round(Math.sin(angle) * radius),
+      y: round(Math.sin(angle) * radius * MAP_FLATTEN),
     };
   });
 }
@@ -71,7 +78,7 @@ export function layoutCards(
     const angle = first + index * step;
     return {
       x: round(area.x + Math.cos(angle) * radius),
-      y: round(area.y + Math.sin(angle) * radius),
+      y: round(area.y + Math.sin(angle) * radius * MAP_FLATTEN),
     };
   });
 }

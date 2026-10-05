@@ -205,7 +205,7 @@
 
 <script setup lang="ts">
 import { Pen, Trash2, X, Bot } from "lucide-vue-next";
-import { socket } from "~/lib/socket";
+import { onResync, socket } from "~/lib/socket";
 import type { PropType } from "vue";
 
 // Dates render in the instance's timezone and language, identically on the
@@ -317,16 +317,24 @@ const revealHighlighted = async () => {
 
 watch(() => props.highlightCommentId, revealHighlighted);
 
+let stopResync = () => {};
 onMounted(() => {
     refreshComments().then(revealHighlighted);
     loadActivity();
     // Someone else changing this card (status, due date, assignee) writes an
     // activity entry too; the board relays those over the socket.
     socket.on("updateCard", onCardUpdated);
+    // A card left open in a tab that was away: what was said and done on it in
+    // the meantime is read again when the tab is back.
+    stopResync = onResync(() => {
+        refreshComments();
+        loadActivity();
+    });
 });
 
 onBeforeUnmount(() => {
     socket.off("updateCard", onCardUpdated);
+    stopResync();
 });
 
 const onCardUpdated = ({ card }: any) => {

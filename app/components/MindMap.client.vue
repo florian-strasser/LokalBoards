@@ -315,7 +315,7 @@ const onViewportDown = (event) => {
     // never fire. That is how the corner's buttons were dead for a while.
     if (event.target.closest?.("button, a, input, textarea, select, label"))
         return;
-    touched.value = true;
+    framed.value = false;
     pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
     if (pointers.size === 2) return startPinch();
     panning.value = true;
@@ -374,7 +374,7 @@ const clampZoom = (value) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
 // browser says "zoom"; two fingers without it mean scroll, and on a map that
 // is panning.
 const onWheel = (event) => {
-    touched.value = true;
+    framed.value = false;
     if (event.ctrlKey || event.metaKey) {
         const rect = viewport.value.getBoundingClientRect();
         zoomAt(
@@ -397,8 +397,24 @@ const zoomAt = (factor, originX, originY) => {
     zoom.value = next;
 };
 const zoomBy = (factor) => {
-    touched.value = true;
+    framed.value = false;
     zoomAt(factor, 0, 0);
+};
+
+// How the map opens: at its real size, with the board's name in the middle.
+//
+// It used to open zoomed out far enough to show everything, which on a board of
+// any size meant text a few pixels high — a picture of the map rather than
+// something to read. At full size the names can be read from the first moment
+// and the branches lead off to the rest; the whole of it at once is one press
+// away, on the button in the corner.
+//
+// The plane hangs from the middle of the pane, so this holds through a change
+// of window size without anything having to be worked out again.
+const home = () => {
+    zoom.value = 1;
+    pan.x = -place.value.root.x;
+    pan.y = -place.value.root.y;
 };
 
 // Everything on screen at once, never blown up past its own size. The margin
@@ -417,16 +433,15 @@ const fit = () => {
     return true;
 };
 
-// Until somebody moves the map themselves it keeps framing itself: on the
-// first render, when the pane it is drawn in settles to its real size, and
-// when the window changes shape. The moment they pan, zoom or drag anything,
-// the view is theirs and nothing moves it again.
-const touched = ref(false);
+// Somebody who asked for the whole map goes on getting the whole map as the
+// window changes shape — until they pan, zoom or drag something, when the view
+// is theirs and nothing moves it again.
+const framed = ref(false);
 let watchSize = null;
 onMounted(() => {
-    nextTick(fit);
+    home();
     watchSize = new ResizeObserver(() => {
-        if (!touched.value) fit();
+        if (framed.value) fit();
     });
     if (viewport.value) watchSize.observe(viewport.value);
 });
@@ -465,7 +480,7 @@ const holdFocus = (event) => {
 
 const startDrag = (event, kind, id) => {
     if (!props.writeAccess || event.button !== 0 || pointers.size > 1) return;
-    touched.value = true;
+    framed.value = false;
     const at =
         kind === "board"
             ? place.value.root
@@ -628,9 +643,9 @@ const applyMoved = (nodes) => {
     }
 };
 
-// Fitting by hand is asking the map to take the view back over.
+// Fitting by hand is asking the map to keep the whole of itself in view.
 const refit = () => {
-    touched.value = false;
+    framed.value = true;
     fit();
 };
 

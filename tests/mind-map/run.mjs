@@ -14,6 +14,12 @@
 // cannot move anything, and a member of one board cannot move a node on
 // another by sending its id.
 //
+// And how the map sits on the page: it opens at its real size with the board's
+// name in the middle, and it runs on behind the header and the board's title —
+// so a card that has ended up behind them has to open and drag like any other,
+// the empty canvas up there has to move the map, and the header's own controls
+// have to go on working with the map behind them.
+//
 // Requires a built app (`npm run build`) and the credentials in `.env.local`.
 // Creates and drops a database of its own.
 import fs from "node:fs";
@@ -107,13 +113,25 @@ try {
     content: "- [x] Logo\n- [ ] Icons", assignees: [owner.id], dueDate: "2026-10-05T09:00:00Z" });
 
   browser = await chromium.launch();
-  const open = async (who) => {
-    const context = await browser.newContext({ viewport: { width: 1400, height: 1000 } });
+  // The map opens at its real size, which on a board this spread out leaves
+  // some of it outside the window. Everything here that is about dragging one
+  // node to another wants all of it in reach, so it asks for the whole map the
+  // way a person would; what the map looks like as it opens has a section of
+  // its own further down.
+  const settle = async (page, { whole = true } = {}) => {
+    await page.waitForSelector(".mindmap-root", { timeout: 15000 });
+    await page.waitForTimeout(1200);
+    if (whole) {
+      await page.getByRole("button", { name: "Fit to screen" }).click();
+      await page.waitForTimeout(300);
+    }
+  };
+  const open = async (who, { whole = true, viewport = { width: 1400, height: 1000 } } = {}) => {
+    const context = await browser.newContext({ viewport });
     await context.addCookies([{ name: "session_token", value: who.token, domain: "127.0.0.1", path: "/" }]);
     const page = await context.newPage();
     await page.goto(`${BASE}/board/${boardId}`, { waitUntil: "domcontentloaded" });
-    await page.waitForSelector(".mindmap-root", { timeout: 15000 });
-    await page.waitForTimeout(1200);
+    await settle(page, { whole });
     return page;
   };
   const mine = await open(owner);
@@ -179,8 +197,7 @@ try {
   const [[extra]] = await c.query("SELECT id FROM areas WHERE board = ? ORDER BY id DESC LIMIT 1", [boardId]);
   await c.query("UPDATE areas SET archivedAt = NOW() WHERE id = ?", [extra.id]);
   await mine.reload({ waitUntil: "domcontentloaded" });
-  await mine.waitForSelector(".mindmap-root");
-  await mine.waitForTimeout(1200);
+  await settle(mine);
 
   // --- Dragging a card --------------------------------------------------------
   console.log("\ndragging a card");
@@ -199,8 +216,7 @@ try {
     Math.abs((await box(theirs, cardNode(first))).x - after.x) < 12);
 
   await mine.reload({ waitUntil: "domcontentloaded" });
-  await mine.waitForSelector(".mindmap-root");
-  await mine.waitForTimeout(1200);
+  await settle(mine);
   const reloaded = await planeAt(mine, cardNode(first));
   check("and it is still there after a reload",
     Math.round(reloaded.x) === Number(moved.mapX) && Math.round(reloaded.y) === Number(moved.mapY),
@@ -271,8 +287,7 @@ try {
   console.log("\nsomebody who may only read");
   await c.query("UPDATE invitations SET permission = 'read' WHERE board = ? AND user = ?", [boardId, colleague.id]);
   await theirs.reload({ waitUntil: "domcontentloaded" });
-  await theirs.waitForSelector(".mindmap-root");
-  await theirs.waitForTimeout(1200);
+  await settle(theirs);
   check("has no + to press", (await theirs.locator('[data-testid="new-card-button"]').count()) === 0);
   const heldBefore = await planeAt(theirs, cardNode(third));
   await drag(theirs, cardNode(third), 150, 90);
@@ -281,6 +296,122 @@ try {
   await theirs.locator(cardNode(third)).first().click();
   await theirs.waitForTimeout(900);
   check("but opens one with a click", theirs.url().includes(`card=${third}`), theirs.url());
+
+  // --- How it opens -----------------------------------------------------------
+  console.log("\nopening the map");
+  // The board's name somewhere other than the middle of the plane, so that
+  // "centred on the board's name" cannot be true by accident.
+  const ROOT = { x: 240, y: -130 };
+  await api(owner, "POST", "/api/data/mindmap", { boardId, nodes: [{ kind: "board", id: boardId, ...ROOT }] });
+  const fresh = await open(owner, { whole: false });
+  const view = (page) => page.locator(".mindmap-plane").evaluate((el) => {
+    const m = new DOMMatrix(getComputedStyle(el).transform);
+    return { scale: m.a, x: m.e, y: m.f };
+  });
+  check("it is at its real size, not shrunk to fit", (await view(fresh)).scale === 1, String((await view(fresh)).scale));
+  const pane = await fresh.locator(".mindmap-viewport").boundingBox();
+  const middle = { x: pane.x + pane.width / 2, y: pane.y + pane.height / 2 };
+  const name = await box(fresh, ".mindmap-root");
+  check("with the board's name in the middle of it",
+    Math.abs(name.x - middle.x) < 2 && Math.abs(name.y - middle.y) < 2,
+    JSON.stringify({ name, middle }));
+  await fresh.setViewportSize({ width: 1100, height: 760 });
+  await fresh.waitForTimeout(400);
+  const smaller = await fresh.locator(".mindmap-viewport").boundingBox();
+  const nameNow = await box(fresh, ".mindmap-root");
+  check("and it stays there when the window changes size",
+    Math.abs(nameNow.x - (smaller.x + smaller.width / 2)) < 2 && Math.abs(nameNow.y - (smaller.y + smaller.height / 2)) < 2);
+  await fresh.setViewportSize({ width: 1400, height: 1000 });
+  await fresh.waitForTimeout(400);
+
+  // --- Behind the title -------------------------------------------------------
+  console.log("\na card that has ended up behind the board's title");
+  // Level with the title, in the middle of the window: inside the title's row,
+  // clear of the title itself and of the two buttons at the other end of it.
+  const title = await fresh.locator("h1").boundingBox();
+  const spot = { x: middle.x, y: Math.round(title.y + title.height / 2) };
+  const at = { x: ROOT.x + Math.round(spot.x - middle.x), y: ROOT.y + Math.round(spot.y - middle.y) };
+  await api(owner, "POST", "/api/data/mindmap", { boardId, nodes: [{ kind: "card", id: third, ...at }] });
+  await fresh.reload({ waitUntil: "domcontentloaded" });
+  await settle(fresh, { whole: false });
+  const behind = await box(fresh, cardNode(third));
+  check("is drawn there, with the row in front of it",
+    Math.abs(behind.x - spot.x) < 3 && Math.abs(behind.y - spot.y) < 3 &&
+    spot.y < pane.y, JSON.stringify({ behind, spot, paneTop: pane.y }));
+  await fresh.mouse.click(spot.x, spot.y);
+  await fresh.waitForTimeout(900);
+  check("opens when it is pressed", fresh.url().includes(`card=${third}`), fresh.url());
+  await fresh.keyboard.press("Escape");
+  await fresh.waitForTimeout(900);
+  await fresh.mouse.move(spot.x, spot.y);
+  await fresh.mouse.down();
+  await fresh.mouse.move(spot.x + 60, spot.y + 260, { steps: 12 });
+  await fresh.mouse.up();
+  await fresh.waitForTimeout(900);
+  const [[pulled]] = await c.query("SELECT mapX, mapY, area FROM cards WHERE id = ?", [third]);
+  check("and can be dragged out from under it",
+    Number(pulled.mapX) === at.x + 60 && Number(pulled.mapY) === at.y + 260 && Number(pulled.area) === doing,
+    JSON.stringify({ from: at, to: pulled }));
+
+  console.log("\nthe empty canvas behind the title and the header");
+  // Somewhere along the title's row with nothing of the row or the map under it.
+  const clear = await fresh.evaluate(([x0, y]) => {
+    for (let x = x0 + 150; x < x0 + 500; x += 25) {
+      if (document.elementFromPoint(x, y)?.classList.contains("mindmap-viewport")) return x;
+    }
+    return null;
+  }, [middle.x, spot.y]);
+  check("is the map's, not the row's", clear !== null, String(clear));
+  const held = await view(fresh);
+  await fresh.mouse.move(clear, spot.y);
+  await fresh.mouse.down();
+  await fresh.mouse.move(clear - 150, spot.y + 90, { steps: 10 });
+  await fresh.mouse.up();
+  await fresh.waitForTimeout(300);
+  const let_go = await view(fresh);
+  check("dragging it moves the map", let_go.x - held.x === -150 && let_go.y - held.y === 90,
+    JSON.stringify({ dx: let_go.x - held.x, dy: let_go.y - held.y }));
+  await fresh.mouse.move(clear, spot.y);
+  await fresh.mouse.wheel(0, 120);
+  await fresh.waitForTimeout(300);
+  check("and so does scrolling over it", (await view(fresh)).y - let_go.y === -120,
+    String((await view(fresh)).y - let_go.y));
+
+  console.log("\nthe header's own controls, with the map behind them");
+  await fresh.locator("header input").first().click();
+  check("the search field takes a click",
+    await fresh.evaluate(() => document.activeElement?.tagName === "INPUT" && !!document.activeElement.closest("header")));
+  await fresh.keyboard.press("Escape");
+  const boardMenu = fresh.locator('button[aria-haspopup="menu"]').first();
+  await boardMenu.click();
+  await fresh.waitForTimeout(300);
+  check("the board's menu opens", await fresh.getByRole("button", { name: "Export board" }).isVisible());
+  // Closed the way it is closed: by pressing anywhere else.
+  await fresh.mouse.click(40, 700);
+  await fresh.waitForTimeout(300);
+  // The filter's panel is put in <body>, like every popover.
+  const panels = () => fresh.locator("body > .fixed.z-50").count();
+  const closed = await panels();
+  await fresh.getByRole("button", { name: "Filters" }).click();
+  await fresh.waitForTimeout(300);
+  check("and so does its filter", (await panels()) === closed + 1, `${closed} → ${await panels()}`);
+  await fresh.keyboard.press("Escape");
+
+  // --- A phone ----------------------------------------------------------------
+  // The search dialog is the header's. When the header was lifted over the map
+  // by a wrapper, the dialog was lifted no higher than the board's title, which
+  // stayed on top of it — bright, and pressable through the backdrop.
+  console.log("\nthe search dialog on a phone");
+  const phone = await open(owner, { whole: false, viewport: { width: 390, height: 844 } });
+  check("the map opens at its real size there too", (await view(phone)).scale === 1);
+  const menuAt = await phone.locator('button[aria-haspopup="menu"]').first().boundingBox();
+  await phone.locator('header button[aria-label="Search"]').click();
+  await phone.waitForTimeout(900);
+  const onTop = await phone.evaluate(([x, y]) => {
+    const el = document.elementFromPoint(x, y);
+    return { menu: !!el?.closest('button[aria-haspopup="menu"]'), dialog: !!el?.closest(".z-40") };
+  }, [menuAt.x + menuAt.width / 2, menuAt.y + menuAt.height / 2]);
+  check("covers the board's title and its buttons", onTop.dialog && !onTop.menu, JSON.stringify(onTop));
 
   // --- Back to columns --------------------------------------------------------
   console.log("\nswitching the board back to columns");

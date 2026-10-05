@@ -602,7 +602,7 @@
     </div>
 </template>
 <script setup lang="ts">
-import { socket } from "~/lib/socket";
+import { onResync, socket } from "~/lib/socket";
 import { peopleOn } from "@/utils/boardFilter";
 import {
     Check,
@@ -1469,12 +1469,30 @@ onBeforeUnmount(() => {
     socket.emit("leaveCard", { cardID: props.cardID });
 });
 
+// A card left open in a tab that was away shows what it was when the tab left.
+// Back again, it reads itself — unless its description is being written at
+// that moment, which is somebody's unsaved work and not to be replaced by the
+// copy on the server. (That is a connection dropping under a person at work,
+// not a tab coming back; the next save settles it either way.)
+const resyncCard = async () => {
+    if (editingDescription.value) return;
+    try {
+        const fresh = await $fetch(`/api/data/card?cardID=${props.cardID}`);
+        if (fresh?.card) handleCardUpdated(fresh.card, fresh.attachments);
+    } catch (error) {
+        console.error("Could not refresh the card:", error);
+    }
+};
+
+let stopResync = () => {};
 onMounted(() => {
     socket.on("updateCard", onSocketUpdateCard);
+    stopResync = onResync(resyncCard);
 });
 
 onBeforeUnmount(() => {
     socket.off("updateCard", onSocketUpdateCard);
+    stopResync();
     revokeAttachmentBlob();
 });
 

@@ -303,6 +303,72 @@ select.form-control,
         background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23aeaeb2' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
     }
 }
+/* What the editor needs from a stylesheet to work at all.
+ *
+ * ProseMirror ships a handful of rules it relies on, and TipTap normally puts
+ * them in the page itself. The editor here is told not to (`injectCSS: false`
+ * in CardEditor.vue — this file is where the app's CSS lives), so they have to
+ * be here, and until now they were not. Two things followed:
+ *
+ * The caret jumped to a line of its own after an emoji. Behind something it
+ * cannot put a caret next to — an emoji is one — at the end of a line, the
+ * editor adds an invisible image to give the caret somewhere to stand. An
+ * image, in this app's reset as in most, is `display: block`; so the invisible
+ * image took a line to itself, the caret went under it, and the box grew a row
+ * that vanished again with the next character typed. The rule below is the
+ * editor's own guard against exactly that reset.
+ *
+ * And spaces were not kept as typed. Without `white-space: pre-wrap` a browser
+ * collapses two spaces into one, so to show the second it writes a
+ * non-breaking space instead — which was then saved into the comment or the
+ * description. It is also what the editor complained about in the console
+ * every time it opened.
+ *
+ * The rest of what TipTap would inject is left out on purpose: turning
+ * ligatures off would make text look different while it is being written than
+ * once it is saved, and hiding the selection around a selected image needs a
+ * style for the selected image to take its place, which is a design decision
+ * rather than a repair. */
+.ProseMirror {
+    position: relative;
+    white-space: pre-wrap;
+    white-space: break-spaces;
+}
+.ProseMirror [contenteditable="false"] {
+    white-space: normal;
+}
+.ProseMirror [contenteditable="false"] [contenteditable="true"] {
+    white-space: pre-wrap;
+}
+img.ProseMirror-separator {
+    display: inline !important;
+    border: none !important;
+    margin: 0 !important;
+    width: 0 !important;
+    height: 0 !important;
+}
+/* The box the editor is mounted in is a flex column, for one reason: Safari.
+ *
+ * An emoji in the editor is something the caret cannot go into, and WebKit
+ * paints a selection that covers only such a thing wrongly — the highlight runs
+ * from the start of the line to the end of the emoji, as if the text before it
+ * were selected as well. It is not: copy it and you get the emoji. The
+ * selection is right and only its picture is wrong, anywhere on a line, however
+ * it was made.
+ *
+ * Nothing about the emoji, the paragraph or the editor's own styles changes
+ * that; it was there with every stylesheet switched off. What does is what the
+ * editable box is laid out *as*: as a flex item WebKit paints it correctly. So
+ * the wrapper becomes a flex column with the editor as its one item — which
+ * leaves everything inside the editor laid out exactly as it was, and the
+ * editor itself the full width it always had.
+ *
+ * tests/editor-emoji measures the painted highlight in WebKit, so this cannot
+ * quietly stop working. */
+.editor-box {
+    display: flex;
+    flex-direction: column;
+}
 /* The rich-text editor shares the same skin as the form controls. */
 .tiptap {
     padding: 1.5rem;
@@ -1052,6 +1118,16 @@ button.label-pill:focus-visible,
     overflow: visible;
     touch-action: none;
     cursor: grab;
+}
+/* The part of the canvas that lies behind the header and the title. Nodes up
+   there are the map's own and take a press as they do anywhere; this is the
+   empty space between them, so that dragging or scrolling it moves the map as
+   it does lower down. It is the viewport's, which is what listens, and it sits
+   under everything else the viewport draws. */
+.mindmap-viewport::before {
+    content: "";
+    position: absolute;
+    inset: -100vh 0 0;
 }
 .mindmap-panning {
     cursor: grabbing;

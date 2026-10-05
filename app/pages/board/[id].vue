@@ -8,15 +8,18 @@
         "
     >
         <!-- A mind map runs on up behind the header and the title rather than
-             stopping at an edge below them, so on that layout they are lifted
-             above it: its controls stay on top and pressable, and the map is
-             seen through the space around them. -->
-        <div :class="{ 'relative z-20': boardStyle === 'mindmap' }">
-            <AppHeader />
-        </div>
+             stopping at an edge below them, so on that layout they float above
+             it: the map is seen through the space around their controls, and a
+             press on that space goes through to the map — a card that has
+             ended up behind the title is still a card you can open or drag.
+             Only the controls themselves take a press (`pointer-events-auto`,
+             here on the filter and the menu, in AppHeader on its three). -->
+        <AppHeader :floating="boardStyle === 'mindmap'" />
         <div
             class="w-full pt-12 pb-7 grow-0 shrink-0"
-            :class="{ 'relative z-20': boardStyle === 'mindmap' }"
+            :class="{
+                'relative z-20 pointer-events-none': boardStyle === 'mindmap',
+            }"
         >
             <Connection
                 :userID="userID"
@@ -67,7 +70,7 @@
                          and relies on its static position to sit below. -->
                     <div
                         v-if="!accessError"
-                        class="flex h-9 shrink-0 items-center gap-2 sm:h-12"
+                        class="pointer-events-auto flex h-9 shrink-0 items-center gap-2 sm:h-12"
                     >
                     <BoardFilter
                         v-model="boardFilter"
@@ -164,6 +167,7 @@
         <div
             v-if="boardArchived && !accessError"
             class="bg-primary/10 mx-8 mb-2 flex flex-wrap items-center gap-3 rounded-lg px-4 py-3 dark:bg-white/10"
+            :class="{ 'relative z-20': boardStyle === 'mindmap' }"
         >
             <ArchiveRestore class="text-primary size-5 shrink-0" />
             <span class="text-dark grow dark:text-white">{{
@@ -486,7 +490,7 @@
     </div>
 </template>
 <script setup lang="ts">
-import { socket } from "~/lib/socket";
+import { onResync, socket } from "~/lib/socket";
 import {
     assigneesOf,
     filterFromQuery,
@@ -1086,35 +1090,103 @@ const reloadAreas = async () => {
         const data = await $fetch(`/api/data/areas?boardId=${boardID.value}`);
         if (!data?.areas) return;
         areas.value = data.areas;
-        for (const area of areas.value) await fetchCardsForArea(area.id);
+        // Asked again, not remembered: every area here may have been loaded
+        // once already, and the point is what has changed since.
+        await Promise.all(
+            areas.value.map((area) =>
+                fetchCardsForArea(area.id, { again: true }),
+            ),
+        );
     } catch (err) {
         console.error("Could not reload the board:", err);
     }
 };
 
-const fetchCardsForArea = async (areaId) => {
+// Catching up after being away.
+//
+// A tab in the background hangs up after a minute and connects again when it is
+// looked at (see `app/utils/socketRest.ts`); the same goes for a connection the
+// network dropped for longer than the server remembers. Either way this page
+// heard nothing of what happened in between, and used to go on showing the
+// board as it was when it left until somebody reloaded it. So it reads the
+// board again: what it is called and how it is laid out, its areas and cards,
+// its labels, and which cards have something unread.
+//
+// The board may not be there to come back to — deleted, or this account taken
+// off it. The server answers both the same way on purpose (somebody without
+// access to a private board is told it does not exist, so that board numbers
+// cannot be tried one after another), so this cannot tell them apart either and
+// does not pretend to: the page says what loading it afresh would say.
+const resyncBoard = async () => {
+    if (accessError.value) return;
     try {
-        const { data, error } = await useFetch(
-            `/api/data/cards?areaId=${areaId}`,
-            {
-                method: "GET",
-            },
+        const data = await $fetch(
+            `/api/data/board?id=${boardID.value}&userId=${userID}`,
         );
-
-        if (error.value) {
-            console.error("Error fetching cards:", error.value);
-        } else if (data.value?.cards) {
-            if (!cards.value[areaId]) {
-                cards.value[areaId] = [];
-            }
-            // Ensure each card has a status field
-            data.value.cards.forEach((card) => {
-                if (typeof card.status === "undefined") {
-                    card.status = false;
-                }
-            });
-            cards.value[areaId] = data.value.cards;
+        if (data?.board) {
+            boardName.value = data.board.name;
+            boardArchived.value = !!data.board.archivedAt;
+            boardStyle.value = data.board.style || "kanban";
+            boardNode.mapX = data.board.mapX ?? null;
+            boardNode.mapY = data.board.mapY ?? null;
+            boardStatus.value = data.board.status || "private";
+            boardImage.value = data.board.image || null;
+            boardColor.value = data.board.color || null;
+            writeAccess.value = data.writeAccess;
         }
+    } catch (err: any) {
+        const status = err?.statusCode ?? err?.response?.status;
+        if (status === 404 || status === 403) {
+            cards.value = {};
+            accessError.value =
+                status === 404
+                    ? "This board does not exist"
+                    : "You don't have access to this board";
+            return;
+        }
+        // Anything else is the network still finding its feet: what is on
+        // screen stays, and the next connection tries again.
+        console.error("Could not catch up on the board:", err);
+        return;
+    }
+    await reloadAreas();
+    loadLabels();
+    refreshUnreadCards();
+};
+
+// `again` is for an area whose cards have been loaded before. `useFetch` is
+// what loads them the first time, because it carries what the server rendered
+// over to the browser instead of fetching it twice — and for the same reason it
+// answers a second call for the same address from what it already holds,
+// without asking the server. That is right while the page loads and wrong ever
+// after: reloading a board that way fetched its areas and then showed each
+// one's cards as they had been.
+const fetchCardsForArea = async (areaId, { again = false } = {}) => {
+    try {
+        let fetched;
+        if (again) {
+            fetched = (await $fetch(`/api/data/cards?areaId=${areaId}`))?.cards;
+        } else {
+            const { data, error } = await useFetch(
+                `/api/data/cards?areaId=${areaId}`,
+                {
+                    method: "GET",
+                },
+            );
+            if (error.value) {
+                console.error("Error fetching cards:", error.value);
+                return;
+            }
+            fetched = data.value?.cards;
+        }
+        if (!fetched) return;
+        // Ensure each card has a status field
+        fetched.forEach((card) => {
+            if (typeof card.status === "undefined") {
+                card.status = false;
+            }
+        });
+        cards.value[areaId] = fetched;
     } catch (err) {
         console.error("Error:", err);
     }
@@ -1671,5 +1743,8 @@ onMounted(() => {
     // highlight) and clear the board's non-card notifications (e.g. invitations).
     refreshUnreadCards();
     markBoardNotificationsRead();
+    stopResync = onResync(resyncBoard);
 });
+let stopResync = () => {};
+onBeforeUnmount(() => stopResync());
 </script>

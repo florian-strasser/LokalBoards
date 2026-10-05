@@ -134,7 +134,9 @@
                 </button>
             </li>
         </ul>
-        <EditorContent :editor="editor" />
+        <!-- `editor-box`: see main.css. It is there for Safari, which otherwise
+             paints a selection of one emoji across the whole line. -->
+        <EditorContent :editor="editor" class="editor-box" />
     </div>
 </template>
 <script setup lang="ts">

@@ -526,7 +526,7 @@ const confirmDeleteGroup = async () => {
 // --- the board dialogs -----------------------------------------------------
 // Settings, invite, delete and leave, opened from a tile's menu. The board page
 // offers the same four; this is the same work without opening the board first.
-import { socket } from "~/lib/socket";
+import { onResync, socket } from "~/lib/socket";
 
 const { data: session } = await useFetch("/api/auth/get-session");
 const userID = session.value?.data?.user?.id ?? "";
@@ -683,14 +683,19 @@ const onDashboardChanged = () => reload();
 // and came back would otherwise be in no room at all and hear nothing.
 const joinDashboard = () => socket.emit("joinDashboard");
 
+// A tab that was away longer than the server remembers heard nothing of what
+// changed in the meantime, so it reads the dashboard again when it is back.
+let stopResync = () => {};
 onMounted(() => {
     joinDashboard();
     socket.on("connect", joinDashboard);
     socket.on("dashboardChanged", onDashboardChanged);
+    stopResync = onResync(reload);
 });
 onBeforeUnmount(() => {
     socket.off("connect", joinDashboard);
     socket.off("dashboardChanged", onDashboardChanged);
+    stopResync();
 });
 
 // One definition for the tile, so the group ones cannot drift from the original.
