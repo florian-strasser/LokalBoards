@@ -18,6 +18,13 @@
 - **The server no longer keeps trying to open a connection to nowhere.** The module that makes the browser's live connection is also run by the server when it renders a page. There it had no page address to connect back to, made itself the address `undefined//undefined//undefined`, failed, and retried every few seconds for as long as the server ran — from the first page it rendered after starting. It connects in a browser and nowhere else now.
 - **The search dialog on a phone covers the whole of a mind-map board.** With it open, the board's title and its two buttons stayed bright on top of the dimmed page, and the buttons could still be pressed through it. The header had been lifted over the map by something wrapped around it, and the dialog — which is the header's — was lifted no higher than the title next to it. It is the header itself that floats now, and the dialog is back above everything.
 
+### Security
+
+- **`devalue` is on 5.9.4.** It is the library that writes each server-rendered page's data into the HTML the browser starts from, so unlike most of what an audit turns up it runs on every page load. Six advisories landed on it at once, three of them high — among them input whose serialised form grows quadratically, and an error that escapes as an unhandled rejection where the caller had caught it. Every release up to 5.9.2 is affected; 5.9.4 is past all six, in the app and in the documentation site.
+- **Two advisories remain in `npm audit`, and neither is in what you run.** `braces` (deeply nested glob patterns exhaust the stack) and `node-forge` (a signature check accepts more than it should) have no fixed release to move to yet: every published version of each is covered. Both belong to Nuxt's build toolchain — `braces` globs files while the app is being built, `node-forge` makes the dev server's HTTPS certificate — and neither is among the packages in the built server, which is all the Docker image takes from the build. They will be lifted the day fixed versions exist.
+
+  That is also why the audit that blocks a build asks a different question now. `npm audit --omit=dev` was meant to mean "what ships", but Nuxt keeps its whole toolchain under `dependencies`, so it meant a good deal more — and went red over these two with nothing that could be done about it. The blocking check (`npm run audit:shipped`, after a build) takes the same advisories and fails on the ones that cover a package actually in the built server; it fails just the same when there is no build to look at, when npm cannot complete the audit, or when it cannot read an advisory's version range. The full audit still runs beside it and still shows everything.
+
 ## v0.40.1
 
 ### Fixes

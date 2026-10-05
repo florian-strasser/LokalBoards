@@ -39,13 +39,18 @@ jobs:
       - name: Build
         run: npm run build
 
-      # Blocking: production dependencies (what ships in the image) must be free
-      # of high/critical advisories.
-      - name: Audit production dependencies
-        run: npm audit --omit=dev --audit-level=high
+      # Blocking: what ships in the image must be free of high/critical
+      # advisories. What ships is the built server (.output), which is all the
+      # image takes from the build — not "everything outside devDependencies",
+      # which in a Nuxt project is the whole build toolchain as well. The script
+      # asks npm for the same advisories and fails on the ones that cover a
+      # package in the build above; it says why at the top.
+      - name: Audit what ships
+        run: node scripts/audit-shipped.mjs
 
-      # Informational: full audit incl. dev tooling. Non-blocking so a CVE in a
-      # dev-only dependency doesn't block unrelated PRs.
+      # Informational: the full audit, build and dev tooling included.
+      # Non-blocking, so an advisory in something that never reaches the image
+      # doesn't block unrelated PRs — and visible, so it isn't forgotten either.
       - name: Audit all dependencies (informational)
         continue-on-error: true
         run: npm audit --audit-level=high

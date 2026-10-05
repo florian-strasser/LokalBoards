@@ -152,7 +152,8 @@ Use the punctuation your language actually uses — the existing files do
 - [ ] Code matches the style of the surrounding files.
 
 CI runs the unit suite, a production build, an integration suite (against a
-MySQL service container), `npm audit`, and CodeQL on every push and PR.
+MySQL service container), an audit of the dependencies that ship in the image
+(`npm run audit:shipped`, after a build), and CodeQL on every push and PR.
 
 ## Reporting security issues
 

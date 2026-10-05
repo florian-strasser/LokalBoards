@@ -14,6 +14,7 @@
     "test:integration": "vitest run -c vitest.integration.config.ts",
     "test:e2e": "vitest run -c vitest.e2e.config.ts",
     "test:browser": "playwright test",
+    "audit:shipped": "node scripts/audit-shipped.mjs",
     "demo:screenshots": "bash scripts/demo/run.sh"
   },
   "dependencies": {
@@ -47,7 +48,7 @@
     "uuid": "^14.0.1"
   },
   "overrides": {
-    "devalue": "^5.9.2",
+    "devalue": "^5.9.4",
     "esbuild": "0.28.1",
     "ws": "8.21.0",
     "@hono/node-server": "^2.0.5",
