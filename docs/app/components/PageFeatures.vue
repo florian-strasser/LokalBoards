@@ -81,8 +81,8 @@
 
         <FeatureTile
           class="lg:col-span-2"
-          title="Two ways to look at a board"
-          text="Columns when you are moving work through stages, a single list when you are working down it. Same board and same cards either way — the layout is only a way of looking at them."
+          title="Three ways to look at a board"
+          text="Columns for moving work through stages, a list for working down it, a mind map for laying it out freely. Same board, same cards — the layout is only a way of looking at them."
         >
           <FeatureLayouts />
         </FeatureTile>
@@ -98,7 +98,7 @@
         <FeatureTile
           class="lg:col-span-2"
           title="Bring your board over from Trello"
-          text="Paste a link to a public board, or choose a private board's export file, and it is recreated here: lists, cards, descriptions, checklists, labels, due dates, comments and what was already done. Coming from Wekan or Nextcloud Deck instead? Their export files come across too."
+          text="Paste a public board's link, or choose a private one's export file, and it is recreated here: lists, cards, checklists, labels, due dates, comments. Wekan and Nextcloud Deck files work too."
         >
           <FeatureTrello />
         </FeatureTile>

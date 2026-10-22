@@ -1,4 +1,7 @@
-ARG NODE_VERSION=22.17.0
+# The Node every image runs, in the build and in the container itself. Keep it on
+# the newest 22.x: a Node security release reaches the people running this image
+# through this line or not at all.
+ARG NODE_VERSION=22.23.4
 ARG MYSQL_VERSION=8.4
 
 # --- Build ---------------------------------------------------------------
@@ -16,7 +19,7 @@ WORKDIR /app
 COPY ./package.json ./package-lock.json /app/
 
 # Install exactly what the lockfile pins (reproducible), not a fresh resolve.
-# The npm bundled with this Node image (10.9.2) crashes on the current
+# The npm bundled with Node 22 (npm 10; it was 10.9.2 here) crashes on the current
 # dependency tree with "Cannot read properties of null (reading 'edgesOut')" —
 # an arborist bug fixed in npm 11 — and it also can't read a lockfile written by
 # npm 11. Upgrade npm to match the lockfile's generator, then `npm ci`.

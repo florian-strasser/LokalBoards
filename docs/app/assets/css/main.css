@@ -1867,7 +1867,7 @@ html.menu-open {
 .lay__control {
   position: relative;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   align-self: center;
   padding: 0.2em;
   border-radius: 999px;
@@ -1878,20 +1878,23 @@ html.menu-open {
   z-index: 1;
   padding: 0.3em 1em;
   text-align: center;
+  white-space: nowrap;
   color: var(--color-dark);
   font-weight: 500;
 }
+/* One option wide, which is a third of the control inside its padding — so
+   moving it by its own width is moving it one option along. */
 .lay__thumb {
   position: absolute;
   z-index: 0;
   top: 0.2em;
   bottom: 0.2em;
   left: 0.2em;
-  width: calc(50% - 0.2em);
+  width: calc((100% - 0.4em) / 3);
   border-radius: 999px;
   background: var(--color-white);
   box-shadow: 0 1px 3px color-mix(in oklab, var(--color-dark) 15%, transparent);
-  animation: lay-thumb 9s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+  animation: lay-thumb 13.5s cubic-bezier(0.65, 0, 0.35, 1) infinite;
 }
 .lay__stage {
   position: relative;
@@ -1901,8 +1904,8 @@ html.menu-open {
 .lay__view {
   position: absolute;
   inset: 0;
-  /* Both views hold more than the stage can show, which is the honest shape of
-     a board. The bottom fades out rather than being cut off square. */
+  /* The two lists hold more than the stage can show, which is the honest shape
+     of a board. The bottom fades out rather than being cut off square. */
   mask-image: linear-gradient(to bottom, #000 78%, transparent 99%);
 }
 .lay__view--kanban {
@@ -1910,7 +1913,7 @@ html.menu-open {
   grid-template-columns: 1fr 1fr;
   align-items: start;
   gap: 0.5rem;
-  animation: lay-kanban 9s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+  animation: lay-kanban 13.5s cubic-bezier(0.65, 0, 0.35, 1) infinite;
 }
 /* Stacked full width, the same areas one after another — and much taller than
    the stage, so it fades out sooner. */
@@ -1919,22 +1922,95 @@ html.menu-open {
   flex-direction: column;
   gap: 0.5rem;
   mask-image: linear-gradient(to bottom, #000 62%, transparent 96%);
-  animation: lay-todo 9s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+  animation: lay-todo 13.5s cubic-bezier(0.65, 0, 0.35, 1) infinite;
 }
 .lay__col {
   min-width: 0;
 }
 
-/* The thumb and the two views are on one clock, so the layout underneath has
-   always already changed by the time the control finishes moving. */
+/* The same areas and cards as a map. Unlike the two lists it is drawn to fit:
+   a map with its edge faded off would be a map with cards missing, so there is
+   no mask, and the type is a size smaller to get all eight of them in — on the
+   narrowest tile as well, which is what the 0.85 is worked out from. */
+.lay__view--mind {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85em;
+  mask-image: none;
+  animation: lay-mind 13.5s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+}
+/* The plane the component's numbers are in — see `MAP` there. */
+.lay__map {
+  position: relative;
+  flex: none;
+  width: 34em;
+  height: 16.4em;
+}
+.lay__branches {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.lay__branches path {
+  fill: none;
+  stroke: color-mix(in oklab, var(--color-primary) 45%, transparent);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  /* The viewBox is stretched to the plane, which must not thicken the line. */
+  vector-effect: non-scaling-stroke;
+}
+/* Placed by its centre, as the app places them. No node sets a font-size of its
+   own: `left` and `top` are in `em`, and an `em` there is the node's. */
+.lay__node {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+  color: var(--color-dark);
+  background: var(--color-white);
+  box-shadow: 0 0.2em 0.6em -0.3em color-mix(in oklab, var(--color-dark) 45%, transparent);
+}
+.lay__node--root {
+  padding: 0.5em 1.1em;
+  border-radius: 999px;
+  background: var(--color-primary);
+  color: var(--color-white);
+}
+.lay__node--area {
+  padding: 0.45em 0.8em;
+  border-radius: 0.6em;
+}
+.lay__node--card {
+  width: 11.6em;
+  padding: 0.35em 0.5em;
+  border-radius: 0.45em;
+}
+
+/* The thumb and the three views are on one clock, so the layout underneath has
+   always already changed by the time the control finishes moving. A third of
+   the loop each: four and a half seconds, as each of the two had before.
+
+   The two lists fade through each other, being much the same thing in two
+   arrangements. The map does not: its white nodes over a half-faded list were a
+   second of mud, so the list is gone before the map arrives, and the map before
+   the columns come back. */
 @keyframes lay-thumb {
   0%,
-  40% {
+  27% {
     transform: translateX(0);
   }
-  50%,
-  90% {
+  33.3%,
+  60% {
     transform: translateX(100%);
+  }
+  66.6%,
+  93% {
+    transform: translateX(200%);
   }
   100% {
     transform: translateX(0);
@@ -1942,12 +2018,12 @@ html.menu-open {
 }
 @keyframes lay-kanban {
   0%,
-  38% {
+  25.5% {
     opacity: 1;
     transform: translateY(0);
   }
-  48%,
-  92% {
+  32%,
+  95.5% {
     opacity: 0;
     transform: translateY(-0.4rem);
   }
@@ -1958,18 +2034,37 @@ html.menu-open {
 }
 @keyframes lay-todo {
   0%,
-  38% {
+  25.5% {
     opacity: 0;
     transform: translateY(0.4rem);
   }
-  48%,
-  92% {
+  32%,
+  58.5% {
     opacity: 1;
     transform: translateY(0);
   }
+  62%,
   100% {
     opacity: 0;
-    transform: translateY(0.4rem);
+    transform: translateY(-0.4rem);
+  }
+}
+/* The map does not slide in like a list: it opens out from the board's name. */
+@keyframes lay-mind {
+  0%,
+  61.5% {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+  66%,
+  92% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  96%,
+  100% {
+    opacity: 0;
+    transform: scale(0.94);
   }
 }
 
@@ -1978,7 +2073,8 @@ html.menu-open {
   .lay__view {
     animation: none;
   }
-  .lay__view--todo {
+  .lay__view--todo,
+  .lay__view--mind {
     opacity: 0;
   }
 }

@@ -133,7 +133,12 @@ try {
   check("the Repeat button sets it to repeat every week", set.repeatEvery === "week", String(set.repeatEvery));
   check("without giving it a due date", set.dueDate === null);
   check("from the column it is in", Number(set.repeatArea) === todo, String(set.repeatArea));
-  const aWeekOff = Math.abs(new Date(set.repeatNext).getTime() - (Date.now() + 7 * 864e5));
+  // A week on the calendar, not 7 × 24 hours: the card comes back at the same
+  // time of day, so across a change to or from summer time it is an hour more
+  // or less than that — and this ran wrong every year in the week before one.
+  const weekLater = new Date();
+  weekLater.setDate(weekLater.getDate() + 7);
+  const aWeekOff = Math.abs(new Date(set.repeatNext).getTime() - weekLater.getTime());
   check("and the next one is a week away", aWeekOff < 5 * 60 * 1000, String(set.repeatNext));
   await mine.keyboard.press("Escape");
   await mine.waitForTimeout(900);

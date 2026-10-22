@@ -1,3 +1,31 @@
+## v0.40.3
+
+### Security
+
+- **The image runs Node 22.23.4.** It was still on 22.17.0, a release from June 2025 — so besides this week's Node security release it had missed the five on the 22 line before it, and its OpenSSL was 3.0.16 where 22.23.4 has 3.5.9. Of the ten advisories in this week's release, one matters here more than the rest: a bug in Node's Brotli decoder that writes out of bounds and, in Node's own words, permits remote code execution — and anybody can make this server decode Brotli. Connecting an MCP client by OAuth starts with the client's `client_id`, which may be the address of a document describing the client; the server fetches that document to find out who is asking, before anyone has signed in. Node's `fetch` decodes a Brotli-compressed answer although it never asks for one, and starts decoding before the body is even read — so whoever runs that address chooses the bytes the decoder gets. Two more on the 22 line loosen how a TLS certificate is matched to the host it was meant for, which here concerns the connections the server makes itself: mail, single sign-on, Trello and webhooks; the release also takes a compromised certificate authority out of Node's own list. The rest are about things the app does not use — `dns.resolve`, the permission model, startup snapshots — or need a server it is already talking to.
+
+  Updating the image is all it takes; nothing in the app changes. The unit tests and the browser tests for OAuth sign-in, mail, images, the editor, comments and live updates all pass on 22.23.4. Running from source? Use 22.23.4 or later. Running the Nix package? It takes Node from nixpkgs, which does not have 22.23.4 yet (unstable is on 22.23.3, the flake's own pin on 22.23.2); once it does, `nix flake update nixpkgs` brings it in.
+- **`markdown-it` is on 14.3.3.** It renders descriptions and comments, and it is in the built server as well as in the browser; a link reference definition spread over several lines took it quadratic time — text written to stall the page for everyone who opens the card. 14.3.3 is past it, and past a second, low-rated one about inline HTML.
+- **Toolchain updates with them:** Vite 8.3.5 (several advisories on its development server, among them files outside the project being served, and the `launch-editor` it bundles; 8.3 is inside the range Nuxt 4.5 asks for), `launch-editor` 2.14.2, `hono` 4.13.13 and Vitest 5.0.5. None of them is in what ships.
+- **Four advisories on packages in the image are closed.** A week after the last release, `npm audit` had ten new packages on it, and four of those are in the built server. All four had fixed releases inside the version ranges already asked for, so this is a lockfile change and nothing else:
+  - **`sharp` 0.35.5** — the library that re-encodes every uploaded picture. The advisory is on librsvg, which it uses to read an SVG, and it reads whatever a signed-in user uploads, an SVG included, so of the four this is the one somebody could plausibly reach.
+  - **`prosemirror-view` 1.42.6** — the editor behind descriptions and comments, which had a cross-site-scripting hole in how it handles a paste.
+  - **`@modelcontextprotocol/sdk` 1.32.1** — its OAuth *client* could send credentials to an authorization server that the MCP server it was talking to had named. LokalBoards is the server; the client half of the SDK is not in the built image at all, but the version number was, and that is what the audit goes by.
+  - **`source-map-js` 1.2.2** — a source map built to stall whatever parses it. The app takes no source maps from outside.
+- **Four more in the build toolchain are updated with them:** `proxy-addr` 2.0.8, `seroval` 1.6.9, `shell-quote` 1.12.0 and `postcss-selector-parser` 7.1.6. None of them is in what ships. The documentation site moves to Vue 3.5.44 for an advisory on its server renderer that the app, already past it, did not have.
+- **`simple-git` is gone from both projects.** Four advisories had landed on it, two of them critical — ways to make it run commands of somebody else's choosing. It came only with Nuxt's devtools, which are switched off in the app and run only in development on the documentation site, and it was never in the built server. Its fixed release, 4.0.2, could not simply be forced in: version 4 drops the default export the devtools imported it by, and the documentation site stopped at `nuxt prepare` when that was tried. Devtools 3.4.3, out the next day, no longer uses it at all, and that release is inside the range Nuxt 4.5 already asks for — so it is a lockfile change again, and Nuxt itself stays where it is.
+- **What is left in `npm audit` is `braces` and `node-forge`,** both still without any fixed release, both only in the build toolchain. The audit that blocks a build passes: nothing with an advisory is in the image.
+
+### Internal
+
+- **The repeat test counts a week on the calendar.** It expected a weekly card's next turn exactly 7 × 24 hours away, while the app — rightly — brings it back at the same time of day. In the week before summer time starts or ends those are an hour apart, so the check failed then and only then; it failed this week.
+
+### Documentation
+
+- **The website's feature list knows about the mind map.** The tile about layouts was still headed "Two ways to look at a board", and its picture switched between columns and a list, after v0.40.0 added a third. It is **Three ways to look at a board** now, and the picture goes through all three: the control has a third option, and after the columns and the list the same two areas and the same eight cards are drawn as a map, branching off the board's name. The list still fades into the columns' place as before; the map waits for the list to be gone, since its nodes over a half-faded list were a moment of mush.
+- **The Trello tile is as long as its neighbours.** Mentioning Wekan and Nextcloud Deck had taken its text to seven lines in a row where the other two tiles have five. It is five now: a link for a public board, the export file for a private one, the main things that come across, and that Wekan and Deck files work too.
+- **The guide's page on areas says three as well.** "A board can draw its areas two ways" is three, with a paragraph on when the map is the one to pick and a link to its own section under Boards.
+
 ## v0.40.2
 
 ### Changed
