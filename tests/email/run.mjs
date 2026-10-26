@@ -20,6 +20,7 @@
 //
 // Requires a built app (`npm run build`) and the credentials in `.env.local`.
 // Creates and drops a database of its own. Needs openssl for the TLS half.
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import net from "node:net";
@@ -288,8 +289,13 @@ try {
   const link = letter.text.match(/https?:\/\/[^"'\s<>]*reset-password\/[0-9a-f-]{36}/i)?.[0];
   check("carrying a reset link to this instance", !!link && link.startsWith(BASE), String(link));
   const token = link?.split("/").pop() ?? "";
-  const [[kept]] = await c.query("SELECT COUNT(*) AS n FROM `verification` WHERE `value` = ?", [token]);
-  check("whose token is the one the app stored", Number(kept.n) === 1);
+  // Stored as its SHA-256 since v0.41.0, so a copy of the table is no list of
+  // working reset links; the link carries the token itself.
+  const [[kept]] = await c.query("SELECT COUNT(*) AS n FROM `verification` WHERE `value` = ?",
+    [createHash("sha256").update(token, "utf8").digest("hex")]);
+  check("whose token is the one the app stored, as a hash", Number(kept.n) === 1);
+  const [[plain]] = await c.query("SELECT COUNT(*) AS n FROM `verification` WHERE `value` = ?", [token]);
+  check("and not as it is in the link", Number(plain.n) === 0);
 
   const used = await api("/api/auth/reset-password", { token, newPassword: "a whole new password" });
   check("following the link sets the new password", used.ok, String(used.status));
