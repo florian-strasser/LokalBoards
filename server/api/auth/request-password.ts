@@ -3,12 +3,18 @@ import { v4 as uuidv4 } from "uuid";
 import { sendEmail } from "../../../app/lib/sendEmail";
 import { getEmailSubject, getEmailMessage } from "../../utils/translations";
 import { enforceRateLimit, passwordRequestLimiter } from "../../utils/rateLimit";
+import { hashToken } from "../../utils/auth";
 
 const runtimeConfig = useRuntimeConfig();
 
 const appName = runtimeConfig.appName;
 const baseURL = runtimeConfig.boardsUrl;
 const defaultLanguage = runtimeConfig.language;
+
+// The answer is the same for every address, and so is how long it takes: the
+// link is stored as a hash and the mail goes out after the response. Until
+// v0.41.0 the SMTP round trip was awaited for existing accounts only, so the
+// response time said which addresses had one.
 
 export default defineEventHandler(async (event) => {
   const method = event.req.method;
@@ -49,10 +55,11 @@ export default defineEventHandler(async (event) => {
     if (users.length > 0) {
       const user = users[0];
 
-      // Store token in verification table
+      // Store the token's hash in the verification table; the link carries
+      // the token itself.
       await db.execute(
         "INSERT INTO `verification` (`id`, `identifier`, `value`, `expiresAt`) VALUES (?, ?, ?, ?)",
-        [uuidv4(), user.email, token, expiresAt],
+        [uuidv4(), user.email, hashToken(token), expiresAt],
       );
 
       // Create reset link
@@ -70,11 +77,14 @@ export default defineEventHandler(async (event) => {
         defaultLanguage,
       );
 
-      await sendEmail({
+      // Not awaited (see above). sendEmail logs its own failures; the
+      // request's context is kept alive until the mail server has answered.
+      const sending = sendEmail({
         to: user.email,
         subject: subject,
         text: emailText,
-      });
+      }).catch(() => {});
+      (event as any).waitUntil?.(sending);
     }
     // If user doesn't exist, token is generated but not used - timing is similar
 

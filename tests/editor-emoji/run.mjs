@@ -20,6 +20,11 @@
 // question can see a painted highlight, so this one is measured in a
 // screenshot: where the blue starts and ends, against where the emoji is.
 //
+// It also checks the picker — a popover that holds every emoji and does not
+// move the text when it opens, searched by name — and `:` typed into the text,
+// which lists the emoji a name matches under the caret; Escape there closes the
+// list and leaves the card open.
+//
 // This types into the comment editor of a card and checks the box does not
 // grow when an emoji is the last thing on a line, that Backspace there takes
 // the emoji away again, that two spaces typed in a row are two ordinary spaces
@@ -112,10 +117,15 @@ try {
     await page.getByRole("button", { name: "Write a comment" }).click();
     await page.waitForTimeout(700);
     const editor = page.locator(".card-modal .tiptap").last();
-    const pick = async (emoji) => {
+    // The picker is a popover in <body>, not part of the dialog; the emoji
+    // asked for here are all in its first row.
+    const openPicker = async () => {
       await page.locator(".card-modal button:has(svg.lucide-smile)").last().click();
-      await page.waitForTimeout(300);
-      await page.locator(".card-modal li button.block", { hasText: emoji }).click();
+      await page.waitForTimeout(400);
+    };
+    const pick = async (emoji) => {
+      await openPicker();
+      await page.locator("button.emoji-cell[data-name]", { hasText: emoji }).first().click();
       await page.waitForTimeout(400);
     };
     const look = () => editor.evaluate((el) => {
@@ -229,6 +239,61 @@ try {
       both.selected.endsWith("😄") && both.selected.length > 3 &&
       both.from !== null && both.from < both.emojiLeft - 10 && near(both.to, both.emojiRight),
       `${JSON.stringify(both.selected)} painted ${both.from}–${both.to}px, the emoji is ${both.emojiLeft}–${both.emojiRight}px`);
+
+    // --- The picker, and `:` typed into the text ------------------------------
+    // The old picker took the toolbar's place, and a longer list of emoji
+    // would have pushed the text down; this one floats, so it can hold them all.
+    // In the editor the selection checks above left open, emptied.
+    await editor.click();
+    await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
+    await page.keyboard.press("Backspace");
+    await page.keyboard.type("Heute ");
+    const before = await editor.boundingBox();
+    await openPicker();
+    const offered = await page.locator("button.emoji-cell[data-name]").count();
+    const after = await editor.boundingBox();
+    check("the picker offers far more than eight emoji", offered > 1000, `${offered}`);
+    check("and opening it does not move the text", Math.abs(before.y - after.y) < 1 && Math.abs(before.height - after.height) < 1,
+      `${Math.round(before.y)}px → ${Math.round(after.y)}px`);
+    const focused = await page.evaluate(() => document.activeElement?.getAttribute("aria-label"));
+    check("its search field has the focus", focused === "Search emoji", String(focused));
+    await page.keyboard.type("fire");
+    await page.waitForTimeout(300);
+    const firstFound = await page.locator("button.emoji-cell[data-name]").first().textContent();
+    check("searching finds the emoji by name, best first", firstFound?.trim() === "🔥", JSON.stringify(firstFound));
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(500);
+    const picked = await look();
+    check("Enter puts the first one in, where the caret was",
+      picked.emojis === 1 && picked.text.startsWith("Heute 🔥"), JSON.stringify(picked.text));
+    check("and closes the picker", await page.locator("button.emoji-cell").count() === 0);
+
+    const listbox = page.locator('[role="listbox"]');
+    // ":roc" would be 🪨 :rock: first, which is fair; one letter more is the rocket.
+    await page.keyboard.type(" :rocke");
+    await page.waitForTimeout(400);
+    const suggested = await listbox.locator('[role="option"]').first().textContent().catch(() => null);
+    check("typing : and a name opens a list under the caret", (await listbox.count()) === 1 && /🚀/.test(suggested ?? ""),
+      JSON.stringify(suggested));
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(400);
+    const typedIn = await look();
+    check("Enter there puts the emoji in place of what was typed",
+      typedIn.emojis === 2 && typedIn.text.includes("🚀") && !typedIn.text.includes(":rocke"), JSON.stringify(typedIn.text));
+    check("and the list is gone", (await listbox.count()) === 0);
+
+    await page.keyboard.type(":fi");
+    await page.waitForTimeout(400);
+    const openAgain = await listbox.count();
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(400);
+    check("Escape closes the list", openAgain === 1 && (await listbox.count()) === 0, `${openAgain} list(s) before`);
+    check("and only the list — the card stays open", await page.locator(".card-modal").first().isVisible());
+    check("leaving what was typed as it was", (await look()).text.endsWith(":fi"), JSON.stringify((await look()).text));
+
+    await page.keyboard.type(" :D ");
+    await page.waitForTimeout(300);
+    check("a smiley typed as :D still turns into one", (await look()).emojis === 3, JSON.stringify((await look()).text));
 
     check("the editor has nothing to complain of in the console", complaints.length === 0, complaints[0]?.slice(0, 80) ?? "");
     await browser.close();

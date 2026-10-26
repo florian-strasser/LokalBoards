@@ -183,6 +183,8 @@
   "editorBulletList": "Lista con viñetas",
   "editorCheckList": "Lista de comprobación",
   "editorCodeblock": "Bloque de código",
+  "editorEmojiNone": "No se encontró ningún emoji",
+  "editorEmojiSearch": "Buscar emoji",
   "editorEmojis": "Emojis",
   "editorImage": "Imagen",
   "editorItalic": "Cursiva",

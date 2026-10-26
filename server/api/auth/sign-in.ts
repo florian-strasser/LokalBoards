@@ -1,5 +1,6 @@
 import { setupDatabase } from "../../../app/lib/databaseSetup";
 import { createSession } from "../../utils/auth";
+import { dummyPasswordCheck } from "../../utils/password";
 import {
   blockIfRateLimited,
   recordFailure,
@@ -54,10 +55,9 @@ export default defineEventHandler(async (event) => {
     ]);
 
     if (users.length === 0) {
-      // CRITICAL FIX: Use fake hash comparison to maintain constant time
-      // Always perform bcrypt compare even for non-existent users
-      const fakeHash = "$2a$10$fakehashforconstanttimecomparison";
-      await bcrypt.compare(password, fakeHash);
+      // As long as checking a real password takes, so the response time does
+      // not say whether the address has an account (see password.ts).
+      await dummyPasswordCheck(password);
       recordFailure(event, signInLimiter);
       event.res.statusCode = 401;
       return { error: "invalid_email_or_password" };
@@ -72,9 +72,8 @@ export default defineEventHandler(async (event) => {
     );
 
     if (accounts.length === 0) {
-      // CRITICAL FIX: Use fake hash comparison to maintain constant time
-      const fakeHash = "$2a$10$fakehashforconstanttimecomparison";
-      await bcrypt.compare(password, fakeHash);
+      // An account with no password (single sign-on only) costs the same.
+      await dummyPasswordCheck(password);
       recordFailure(event, signInLimiter);
       event.res.statusCode = 401;
       return { error: "invalid_email_or_password" };

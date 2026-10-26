@@ -2,6 +2,7 @@ import { setupDatabase } from "../../../../app/lib/databaseSetup";
 import { getUserSession } from "../../../utils/auth";
 import { sendEmail } from "../../../../app/lib/sendEmail";
 import { getWelcomeAdminEmail } from "../../../utils/translations";
+import { dummyPasswordCheck } from "../../../utils/password";
 import bcrypt from "bcryptjs";
 import { v4 as uuidv4 } from "uuid";
 
@@ -95,11 +96,9 @@ export default defineEventHandler(async (event) => {
 
     const userExists = existingUsers.length > 0;
 
-    // Always perform fake hash comparison to maintain constant time
-    const fakeHash = "$2a$10$fakehashforconstanttimecomparison";
-    await bcrypt.compare(password, fakeHash);
-
     if (userExists) {
+      // The same cost as hashing the password below.
+      await dummyPasswordCheck(password);
       event.res.statusCode = 400;
       return { error: "EMAIL_ALREADY_EXISTS" };
     }
@@ -134,15 +133,21 @@ export default defineEventHandler(async (event) => {
         ],
       );
 
-      // Create account entry
+      // Create account entry. Keyed by the user's id, not the address, which
+      // can change (see sign-up.ts).
       await conn.execute(
         "INSERT INTO `account` (`id`, `accountId`, `providerId`, `userId`, `password`) VALUES (?, ?, ?, ?, ?)",
-        [uuidv4(), email, "local", userId, hashedPassword],
+        [uuidv4(), userId, "local", userId, hashedPassword],
       );
 
       await conn.commit();
-    } catch (error) {
+    } catch (error: any) {
       await conn.rollback();
+      // The address was taken between the check above and the insert.
+      if (error?.code === "ER_DUP_ENTRY") {
+        event.res.statusCode = 400;
+        return { error: "EMAIL_ALREADY_EXISTS" };
+      }
       throw error;
     } finally {
       conn.release();

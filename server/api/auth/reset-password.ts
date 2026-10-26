@@ -1,5 +1,7 @@
 import { setupDatabase } from "../../../app/lib/databaseSetup";
 import { enforceRateLimit, passwordResetLimiter } from "../../utils/rateLimit";
+import { hashToken } from "../../utils/auth";
+import { dummyPasswordCheck } from "../../utils/password";
 import bcrypt from "bcryptjs";
 
 // UUID v4 regex pattern for token validation
@@ -39,19 +41,19 @@ export default defineEventHandler(async (event) => {
 
     const db = await setupDatabase();
 
-    // CRITICAL FIX: Use constant-time checks for token and user existence
+    // Only the token's hash is stored (see request-password.ts).
+    const tokenHash = hashToken(token);
     const [tokens] = await db.execute(
       "SELECT * FROM `verification` WHERE `value` = ? AND `expiresAt` > NOW()",
-      [token],
+      [tokenHash],
     );
 
     const tokenExists = tokens.length > 0;
 
-    // Always perform fake hash comparison to maintain constant time
-    const fakeHash = "$2a$10$fakehashforconstanttimecomparison";
-    await bcrypt.compare(newPassword, fakeHash);
-
     if (!tokenExists) {
+      // The same cost as hashing the new password below, so a guess learns
+      // nothing from the timing.
+      await dummyPasswordCheck(newPassword);
       event.res.statusCode = 400;
       return { error: "INVALID_TOKEN" };
     }
@@ -65,10 +67,8 @@ export default defineEventHandler(async (event) => {
 
     const userExists = users.length > 0;
 
-    // Always perform another fake hash comparison to maintain constant time
-    await bcrypt.compare(token, fakeHash);
-
     if (!userExists) {
+      await dummyPasswordCheck(newPassword);
       event.res.statusCode = 404;
       return { error: "INVALID_TOKEN" };
     }
@@ -86,7 +86,9 @@ export default defineEventHandler(async (event) => {
     );
 
     // Delete the used token
-    await db.execute("DELETE FROM `verification` WHERE `value` = ?", [token]);
+    await db.execute("DELETE FROM `verification` WHERE `value` = ?", [
+      tokenHash,
+    ]);
 
     // Delete all user sessions to force login with new password
     await db.execute("DELETE FROM `session` WHERE `userId` = ?", [user.id]);

@@ -14,6 +14,7 @@ const DATA_TABLES = [
   "comments",
   "invitations",
   "notifications",
+  "saml_assertions_seen",
   "session",
   "user",
   "verification",

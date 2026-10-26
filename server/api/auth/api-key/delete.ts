@@ -1,6 +1,6 @@
 import { setupDatabase } from "../../../../app/lib/databaseSetup";
 import { getUserSession } from "../../../utils/auth";
-import bcrypt from "bcryptjs";
+import { dummyPasswordCheck } from "../../../utils/password";
 
 export default defineEventHandler(async (event) => {
   const method = event.req.method;
@@ -37,11 +37,8 @@ export default defineEventHandler(async (event) => {
 
     const keyExists = keys.length > 0;
 
-    // Always perform fake hash comparison to maintain constant time
-    const fakeHash = "$2a$10$fakehashforconstanttimecomparison";
-    await bcrypt.compare(keyId, fakeHash);
-
     if (!keyExists) {
+      await dummyPasswordCheck(keyId);
       event.res.statusCode = 404;
       return { error: "API_KEY_NOT_FOUND" };
     }

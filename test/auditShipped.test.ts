@@ -101,6 +101,26 @@ describe("the advisories in npm's report", () => {
     expect(names).toEqual(["braces high", "devalue high", "devalue low"]);
   });
 
+  it("keep each range of an advisory that covers two release lines", () => {
+    // undici as npm reported it on 2026-10-25: one advisory, two entries.
+    const twoLines = {
+      vulnerabilities: {
+        undici: {
+          severity: "high",
+          via: [
+            { name: "undici", severity: "high", range: ">=8.0.0 <8.12.2", title: "content-encodings", url: "https://example.test/GHSA-4", source: 1 },
+            { name: "undici", severity: "high", range: ">=7.18.0 <7.30.1", title: "content-encodings", url: "https://example.test/GHSA-4", source: 2 },
+          ],
+        },
+      },
+    };
+    const found = advisoriesIn(twoLines);
+    expect(found.map((advisory) => advisory.range)).toEqual([">=8.0.0 <8.12.2", ">=7.18.0 <7.30.1"]);
+    // And the 7.x copy that ships is caught by the second of them.
+    const shipped = new Map([["undici", new Set(["7.30.0"])]]);
+    expect(judge(found, shipped).blocking.map((advisory) => advisory.range)).toEqual([">=7.18.0 <7.30.1"]);
+  });
+
   it("are none for a clean report, or for no report at all", () => {
     expect(advisoriesIn({ vulnerabilities: {} })).toEqual([]);
     expect(advisoriesIn(undefined)).toEqual([]);

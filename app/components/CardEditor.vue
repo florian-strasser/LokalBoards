@@ -1,27 +1,7 @@
 <template>
     <div>
         <ul
-            v-if="emojiSelect && editor"
-            class="editor-toolbar flex gap-2 flex-wrap items-center mb-1"
-        >
-            <li>
-                <button
-                    type="button"
-                    @click="emojiSelect = false"
-                    class="block hover:text-primary-hover"
-                    v-tooltip="$t('back')"
-                >
-                    <ArrowLeft class="size-5" />
-                </button>
-            </li>
-            <li v-for="item in emojiList">
-                <button class="block" @click="setEmoji(item.code)">
-                    {{ item.icon }}
-                </button>
-            </li>
-        </ul>
-        <ul
-            v-else-if="editor"
+            v-if="editor"
             class="editor-toolbar flex gap-2 flex-wrap py-0.5 mb-1"
         >
             <li>
@@ -124,14 +104,24 @@
                 </button>
             </li>
             <li>
-                <button
-                    type="button"
-                    @click="emojiSelect = true"
-                    class="block hover:text-primary-hover"
-                    v-tooltip="$t('editorEmojis')"
-                >
-                    <Smile class="size-5" />
-                </button>
+                <!-- A popover rather than a row in the toolbar: it floats over
+                     the text, so it can hold every emoji instead of the eight
+                     that fitted before the row started pushing the editor down.
+                     Typing `:` and a name finds them too, without the mouse. -->
+                <PopoverMenu>
+                    <template #trigger>
+                        <button
+                            type="button"
+                            class="block hover:text-primary-hover"
+                            v-tooltip="$t('editorEmojis')"
+                        >
+                            <Smile class="size-5" />
+                        </button>
+                    </template>
+                    <template #default="{ close }">
+                        <EmojiPicker @pick="(name) => insertEmoji(name, close)" />
+                    </template>
+                </PopoverMenu>
             </li>
         </ul>
         <!-- `editor-box`: see main.css. It is there for Safari, which otherwise
@@ -150,29 +140,18 @@ import {
     Code,
     ListChecks,
     Smile,
-    ArrowLeft,
 } from "lucide-vue-next";
 import { useEditor, EditorContent } from "@tiptap/vue-3";
 import { Placeholder } from "@tiptap/extensions";
 import { TaskItem, TaskList } from "@tiptap/extension-list";
 import Image from "@tiptap/extension-image";
-import Emoji, { emojis } from "@tiptap/extension-emoji";
+import Emoji from "@tiptap/extension-emoji";
+import { editorEmojis } from "~/composables/useEmojiIndex";
 import FileHandler from "@tiptap/extension-file-handler";
 import StarterKit from "@tiptap/starter-kit";
 
 const model = defineModel();
-const emojiSelect = ref(false);
-
-const emojiList = [
-    { icon: "👍", code: "+1" },
-    { icon: "👎", code: "-1" },
-    { icon: "😄", code: "smile" },
-    { icon: "😢", code: "cry" },
-    { icon: "😓", code: "sweat" },
-    { icon: "🎉", code: "party" },
-    { icon: "🔥", code: "fire" },
-    { icon: "🚀", code: "rocket" },
-];
+const emojiIndex = useEmojiIndex();
 
 const editor = useEditor({
     // The model is Markdown; TipTap works in HTML, so convert on load/save.
@@ -188,8 +167,13 @@ const editor = useEditor({
             allowBase64: false, // Disable base64, we'll use URLs
         }),
         Emoji.configure({
-            emojis: emojis,
+            // Written to be drawn in colour; see `editorEmojis`.
+            emojis: editorEmojis,
             enableEmoticons: true,
+            suggestion: emojiSuggestion(
+                () => emojiIndex.entries.value,
+                emojiIndex.loadLanguage,
+            ),
         }),
         FileHandler.configure({
             // Take the paste and stop, rather than uploading the image and
@@ -298,6 +282,11 @@ const editor = useEditor({
         TaskList,
         TaskItem,
     ],
+    // The emoji on offer are the ones this device can draw, which the emoji
+    // extension has just worked out.
+    onCreate: ({ editor: created }) => {
+        emojiIndex.build(created.storage.emoji.isSupported);
+    },
     onBlur: () => {
         model.value = htmlToMarkdown(editor.value.getHTML());
     },
@@ -361,9 +350,9 @@ const uploadImage = async (file: File) => {
     }
 };
 
-const setEmoji = (emojiCode) => {
-    editor.value.chain().focus().setEmoji(emojiCode).run();
-    emojiSelect.value = false;
+const insertEmoji = (name: string, close: () => void) => {
+    close();
+    editor.value?.chain().focus().setEmoji(name).run();
 };
 
 // Watch for external changes to modelValue

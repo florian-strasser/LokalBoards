@@ -113,13 +113,18 @@ export function inRange(version, range) {
  * every package that is affected *through* another one as well; those are the
  * same advisory seen from further up the tree, and it is the package the
  * advisory is actually about that has to be looked for.
+ *
+ * "Once" is per range, not per advisory. An advisory that covers two release
+ * lines of a package — undici 7 and undici 8 — comes as two entries with the
+ * same address and different ranges, and keeping only the first let a shipped
+ * 7.30.0 through on the strength of a range that only spoke about 8.x.
  */
 export function advisoriesIn(report) {
   const seen = new Map();
   for (const entry of Object.values(report?.vulnerabilities ?? {})) {
     for (const via of entry.via ?? []) {
       if (typeof via !== "object" || !via) continue;
-      const key = `${via.name}|${via.url ?? via.source}`;
+      const key = `${via.name}|${via.url ?? via.source}|${via.range}`;
       if (!seen.has(key)) {
         seen.set(key, {
           name: via.name,

@@ -53,6 +53,9 @@ There are two test suites:
   npm run test:integration
   ```
 
+  `TEST_MYSQL_PORT` points them at a server on another port — a throwaway MySQL
+  beside one that already has 3306, for instance.
+
 - **HTTP e2e tests** (`@nuxt/test-utils`) — build and run the real server and hit
   it over HTTP. Same `TEST_MYSQL_*` env as above, then `npm run test:e2e`.
 

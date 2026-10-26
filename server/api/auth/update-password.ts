@@ -1,5 +1,6 @@
 import { setupDatabase } from "../../../app/lib/databaseSetup";
-import { getUserSession } from "../../utils/auth";
+import { getUserSession, hashToken } from "../../utils/auth";
+import { dummyPasswordCheck } from "../../utils/password";
 import { getCookie } from "h3";
 import bcrypt from "bcryptjs";
 
@@ -53,11 +54,9 @@ export default defineEventHandler(async (event) => {
 
     const accountExists = accounts.length > 0;
 
-    // Always perform fake comparison to maintain constant time
-    const fakeHash = "$2a$10$fakehashforconstanttimecomparison";
-    await bcrypt.compare(oldPassword, fakeHash);
-
     if (!accountExists) {
+      // The same cost as checking the old password below.
+      await dummyPasswordCheck(oldPassword);
       event.res.statusCode = 404;
       return { error: "LOCAL_ACCOUNT_NOT_FOUND" };
     }
@@ -85,7 +84,7 @@ export default defineEventHandler(async (event) => {
     if (revokeOtherSessions && currentSessionToken) {
       await db.execute(
         "DELETE FROM `session` WHERE `userId` = ? AND `token` != ?",
-        [session.user.id, currentSessionToken],
+        [session.user.id, hashToken(currentSessionToken)],
       );
     }
 

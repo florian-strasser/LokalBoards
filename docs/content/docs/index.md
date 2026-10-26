@@ -257,6 +257,13 @@ proxy sends `X-Forwarded-Proto: https` as `recommendedProxySettings` does, the
 session cookie is marked `Secure`. Over plain HTTP it is not, so an instance on a
 trusted network works without TLS too.
 
+The sign-in and password-reset limits count attempts per client address. Behind
+a proxy on the same machine or network, as here, the address is read from the
+last `X-Forwarded-For` entry the proxy added, and a client cannot choose its
+own. With a second proxy in front — a CDN such as Cloudflare ahead of nginx —
+set `NUXT_TRUST_PROXY=2`; with nothing in front of the app at all,
+`NUXT_TRUST_PROXY=false`.
+
 ### What has been tested
 
 The package is built on every release: from the lockfile, without network

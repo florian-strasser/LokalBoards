@@ -183,6 +183,8 @@
   "editorBulletList": "Lista wypunktowana",
   "editorCheckList": "Lista kontrolna",
   "editorCodeblock": "Blok kodu",
+  "editorEmojiNone": "Nie znaleziono emoji",
+  "editorEmojiSearch": "Szukaj emoji",
   "editorEmojis": "Emotikony",
   "editorImage": "Obraz",
   "editorItalic": "Kursywa",

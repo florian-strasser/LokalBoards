@@ -1,5 +1,8 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { setupDatabase } from "../../app/lib/databaseSetup";
+import { safeFetch, SafeFetchError } from "./safeFetch";
+import type { LookupFunction } from "./netGuard";
+import { logger } from "./logger";
 
 // LokalBoards as an OAuth 2.1 authorization server and resource server, which
 // is what the MCP authorization spec asks for and what ChatGPT requires.
@@ -117,8 +120,19 @@ const MAX_METADATA_BYTES = 64 * 1024;
  * registration step and no stored secret — the client's identity is a URL whose
  * content its own operator controls, and the document must claim the same URL
  * as its `client_id` so that one client cannot publish another's identity.
+ *
+ * The URL is chosen by whoever starts the flow, so it is fetched like any other
+ * user-supplied URL: through safeFetch, which refuses private, loopback and
+ * link-local addresses (literal or resolved, pinned into the connection so DNS
+ * cannot change its mind between the check and the connect), follows no
+ * redirect, and stops reading at 64 KB rather than reading everything and
+ * keeping 64 KB of it.
  */
-async function fetchClientMetadata(clientId: string): Promise<OAuthClient | null> {
+export async function fetchClientMetadata(
+  clientId: string,
+  // A fake DNS answer, for the tests. Never real DNS in a unit test.
+  deps: { lookup?: LookupFunction } = {},
+): Promise<OAuthClient | null> {
   let url: URL;
   try {
     url = new URL(clientId);
@@ -130,8 +144,8 @@ async function fetchClientMetadata(clientId: string): Promise<OAuthClient | null
   // The escape hatch is for development and for the test suite: a metadata
   // document has to be served from somewhere, and a loopback address cannot
   // easily serve HTTPS. It is off unless deliberately set, and it only ever
-  // relaxes the scheme for loopback — a client_id pointing anywhere else still
-  // has to be HTTPS.
+  // relaxes the rules for loopback — a client_id pointing anywhere else still
+  // has to be HTTPS on a public address.
   const loopback = ["127.0.0.1", "localhost", "[::1]", "::1"].includes(
     url.hostname,
   );
@@ -143,15 +157,21 @@ async function fetchClientMetadata(clientId: string): Promise<OAuthClient | null
   }
 
   try {
-    const response = await fetch(url, {
+    const response = await safeFetch(url, {
       headers: { accept: "application/json" },
-      redirect: "error",
-      signal: AbortSignal.timeout(5000),
+      timeoutMs: 5000,
+      maxBytes: MAX_METADATA_BYTES,
+      onTooLarge: "error",
+      // Loopback is reachable only through the escape hatch above.
+      policy: { allowPrivate: insecureAllowed },
+      lookup: deps.lookup,
     });
+    // Not followed: a redirect would let the document's address differ from
+    // the id it is the document for.
     if (!response.ok) return null;
 
-    const text = (await response.text()).slice(0, MAX_METADATA_BYTES);
-    const metadata = JSON.parse(text);
+    const metadata = response.json<Record<string, any>>();
+    if (!metadata || typeof metadata !== "object") return null;
 
     // The document must name itself. Without this check anybody could hand us
     // somebody else's client_id and have us trust a document they control.
@@ -174,7 +194,14 @@ async function fetchClientMetadata(clientId: string): Promise<OAuthClient | null
       logoUri: metadata.logo_uri ? String(metadata.logo_uri).slice(0, 512) : null,
     };
   } catch (error) {
-    logger.error("Could not read the client's metadata document:", error);
+    // The reason only (blocked, timeout, too large, not JSON), never the body.
+    const reason =
+      error instanceof SafeFetchError
+        ? `${error.code}${error.reason ? ` ${error.reason}` : ""}`
+        : "INVALID_DOCUMENT";
+    logger.error(
+      `Could not read the client's metadata document (${url.host}): ${reason}`,
+    );
     return null;
   }
 }

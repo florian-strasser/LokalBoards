@@ -369,6 +369,40 @@ img.ProseMirror-separator {
     display: flex;
     flex-direction: column;
 }
+
+/* The emoji picker (EmojiPicker.vue) and the list under the caret while `:fi…`
+ * is typed (EmojiSuggestion.vue). Eight to a row: in the picker's 18rem that
+ * is a 2rem square each, big enough to aim at and small enough that a group of
+ * a few hundred is still a scroll and not a trek. */
+.emoji-grid {
+    display: grid;
+    grid-template-columns: repeat(8, minmax(0, 1fr));
+}
+.emoji-cell {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 2rem;
+    font-size: 1.375rem;
+    line-height: 1;
+    border-radius: 0.5rem;
+}
+.emoji-cell:hover,
+.emoji-cell:focus-visible {
+    background-color: color-mix(in oklab, var(--color-primary) 14%, transparent);
+    outline: 0;
+}
+/* A line between the groups instead of a heading for each: the emoji say what
+ * the group is better than its name would, in any of the app's languages. */
+.emoji-section + .emoji-section {
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid color-mix(in oklab, currentColor 12%, transparent);
+}
+.emoji-suggestion-glyph {
+    font-size: 1.25rem;
+    line-height: 1;
+}
 /* The rich-text editor shares the same skin as the form controls. */
 .tiptap {
     padding: 1.5rem;

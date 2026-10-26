@@ -1,5 +1,12 @@
-import { SAML } from "@node-saml/node-saml";
+import { createHash } from "node:crypto";
+import {
+  SAML,
+  ValidateInResponseTo,
+  type CacheItem,
+  type CacheProvider,
+} from "@node-saml/node-saml";
 import { setupDatabase } from "../../app/lib/databaseSetup";
+import { logger } from "./logger";
 import type { SsoConfig, SsoProfile } from "./sso";
 import { pickClaim } from "./sso";
 
@@ -148,6 +155,64 @@ export function samlCallbackUrl(event?: any, providerId?: string): string {
     : url;
 }
 
+/** How long an AuthnRequest may wait for its answer (MFA, a forgotten password …). */
+export const SAML_REQUEST_TTL_MS = 60 * 60 * 1000;
+
+// node-saml remembers the id of every AuthnRequest it sends so that the answer
+// can be checked against it — but only if it is asked to (its
+// `validateInResponseTo` defaults to "never", which is how LokalBoards ran
+// until v0.41.0), and only in a cache that, by default, lives inside the SAML
+// instance. buildSaml() makes a new instance per request, so that cache would
+// never hold the id by the time the answer came back. This one keeps the ids
+// in `saml_assertions_seen`, beside the assertion ids, so it survives the
+// instance, a restart between the redirect and the answer, and a second
+// process. Rows are `req:<sha256(provider, id)>`, which no assertion id can
+// collide with (an XML ID cannot contain a colon), and they expire with the
+// rest of that table.
+export class SamlRequestCache implements CacheProvider {
+  constructor(
+    private readonly scope: string,
+    private readonly ttlMs: number = SAML_REQUEST_TTL_MS,
+  ) {}
+
+  private key(requestId: string): string {
+    return (
+      "req:" +
+      createHash("sha256").update(`${this.scope}\n${requestId}`).digest("hex")
+    );
+  }
+
+  async saveAsync(requestId: string, value: string): Promise<CacheItem | null> {
+    await setupDatabase().execute(
+      "INSERT INTO `saml_assertions_seen` (`id`, `expiresAt`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `expiresAt` = VALUES(`expiresAt`)",
+      [this.key(requestId), new Date(Date.now() + this.ttlMs)],
+    );
+    return { value, createdAt: Date.now() };
+  }
+
+  async getAsync(requestId: string): Promise<string | null> {
+    if (!requestId) return null;
+    const [rows]: any = await setupDatabase().execute(
+      "SELECT `expiresAt` FROM `saml_assertions_seen` WHERE `id` = ? AND `expiresAt` > NOW()",
+      [this.key(requestId)],
+    );
+    if (!rows[0]) return null;
+    // node-saml compares the issue time against requestIdExpirationPeriodMs.
+    return new Date(
+      new Date(rows[0].expiresAt).getTime() - this.ttlMs,
+    ).toISOString();
+  }
+
+  async removeAsync(requestId: string | null): Promise<string | null> {
+    if (!requestId) return null;
+    await setupDatabase().execute(
+      "DELETE FROM `saml_assertions_seen` WHERE `id` = ?",
+      [this.key(requestId)],
+    );
+    return requestId;
+  }
+}
+
 export function buildSaml(
   config: SamlConfig,
   event?: any,
@@ -185,6 +250,14 @@ export function buildSaml(
     // providers do not require it, and an unsigned AuthnRequest gives away
     // nothing — the response is what carries the identity, and that is signed.
     racComparison: "exact",
+    // An answer that names a request must name one this instance sent, for
+    // this provider, within the hour — and each request can be answered once.
+    // One that names none is a provider-initiated sign-in, which the ACS
+    // refuses unless it is switched on. ("always" would make node-saml refuse
+    // those itself, with an error the sign-in page cannot explain.)
+    validateInResponseTo: ValidateInResponseTo.ifPresent,
+    requestIdExpirationPeriodMs: SAML_REQUEST_TTL_MS,
+    cacheProvider: new SamlRequestCache(providerId || "saml"),
     // Encrypted assertions, where the provider requires them. Some do by
     // policy — public administration and universities more often than most —
     // and without the key their assertion cannot even be read.
@@ -197,9 +270,11 @@ export function buildSaml(
 // racing with the same assertion cannot both win — the second one gets a
 // duplicate-key error and is refused.
 //
-// Only needed for assertions we did not ask for. When we started the sign-in,
-// the response is tied to our request; an unsolicited one is a bearer token
-// with nothing tying it to anybody, and could otherwise be presented again.
+// Run for every assertion, solicited or not. A solicited one is also tied to
+// its request, which can be answered once; this table is the backstop for the
+// assertion's whole validity window. Until v0.41.0 a solicited assertion
+// skipped it — and, with InResponseTo never checked, could be replayed until
+// it expired.
 export async function consumeAssertion(
   id: string,
   notOnOrAfter: Date | null,
@@ -210,7 +285,7 @@ export async function consumeAssertion(
   const expires =
     notOnOrAfter && !Number.isNaN(notOnOrAfter.getTime())
       ? new Date(notOnOrAfter.getTime() + 60 * 60 * 1000)
-      : new Date(Date.now() + 60 * 60 * 1000);
+      : new Date(Date.now() + 24 * 60 * 60 * 1000);
   try {
     await db.execute(
       "INSERT INTO `saml_assertions_seen` (`id`, `expiresAt`) VALUES (?, ?)",
@@ -225,6 +300,85 @@ export async function consumeAssertion(
     () => {},
   );
   return true;
+}
+
+/**
+ * The assertion's own id, which SAML requires to be unique. Where a provider
+ * leaves it off, the assertion's bytes are hashed instead — a replay is the
+ * same bytes, and two genuine sign-ins never are, since each carries its own
+ * instant.
+ */
+export function assertionIdOf(assertion: any): string {
+  const parsed = assertion?.getAssertion?.();
+  const id = String(parsed?.Assertion?.$?.ID ?? "");
+  if (id) return id;
+  const xml =
+    typeof assertion?.getAssertionXml === "function"
+      ? assertion.getAssertionXml()
+      : "";
+  return xml
+    ? "sha256:" + createHash("sha256").update(String(xml)).digest("hex")
+    : "";
+}
+
+/** The latest moment the assertion could still be presented, from its conditions or session. */
+export function assertionWindowOf(assertion: any): Date | null {
+  const parsed = assertion?.getAssertion?.();
+  const candidates = [
+    assertion?.sessionNotOnOrAfter,
+    parsed?.Assertion?.Conditions?.[0]?.$?.NotOnOrAfter,
+  ]
+    .filter(Boolean)
+    .map((value) => new Date(String(value)).getTime())
+    .filter((time) => !Number.isNaN(time));
+  return candidates.length ? new Date(Math.max(...candidates)) : null;
+}
+
+/**
+ * The ACS policy for an assertion node-saml has already verified (signature,
+ * audience, destination, conditions, clock, and — when it names one — the
+ * request it answers): provider-initiated sign-in only where it is allowed,
+ * each assertion used once, and the issuer pinned where a name is configured.
+ */
+export async function acceptAssertion(
+  assertion: any,
+  config: SamlConfig,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  // An assertion carrying no `InResponseTo` answers no request of ours: it is
+  // a provider-initiated sign-in, somebody arriving from their portal. That is
+  // a normal thing to want and an instance can allow it, but it is a bearer
+  // token with nothing tying it to this browser, so it is refused unless
+  // switched on.
+  const solicited = Boolean(assertion?.inResponseTo);
+  if (!solicited && !config.allowIdpInitiated) {
+    logger.warn("Unsolicited SAML assertion refused (not enabled)");
+    return { ok: false, reason: "idp_initiated_disabled" };
+  }
+
+  // Each assertion may be used once, solicited or not.
+  const assertionId = assertionIdOf(assertion);
+  if (
+    !assertionId ||
+    !(await consumeAssertion(assertionId, assertionWindowOf(assertion)))
+  ) {
+    logger.warn("SAML assertion replayed or unidentifiable");
+    return { ok: false, reason: "assertion_replayed" };
+  }
+
+  // Pin the provider by name as well as by key, where a name is configured.
+  // The signature proves the assertion came from whoever holds that private
+  // key; this proves it was issued by the entity we expect. node-saml does
+  // not do it for assertions — it compares `idpIssuer` only for logout
+  // messages — so it is done here, against the issuer it reports.
+  if (config.idpIssuer && String(assertion?.issuer || "") !== config.idpIssuer) {
+    logger.warn(
+      "SAML assertion from an unexpected issuer:",
+      String(assertion?.issuer || "(none)"),
+    );
+    return { ok: false, reason: "issuer_mismatch" };
+  }
+
+  return { ok: true };
 }
 
 // What a provider sends back, flattened into the same shape OpenID Connect

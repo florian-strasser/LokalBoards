@@ -183,6 +183,8 @@
   "editorBulletList": "Liste à puces",
   "editorCheckList": "Liste de contrôle",
   "editorCodeblock": "Bloc de code",
+  "editorEmojiNone": "Aucun emoji trouvé",
+  "editorEmojiSearch": "Rechercher un emoji",
   "editorEmojis": "Émojis",
   "editorImage": "Image",
   "editorItalic": "Italique",

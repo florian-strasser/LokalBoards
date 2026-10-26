@@ -183,6 +183,8 @@
   "editorBulletList": "Bullet list",
   "editorCheckList": "Check list",
   "editorCodeblock": "Codeblock",
+  "editorEmojiNone": "No emoji found",
+  "editorEmojiSearch": "Search emoji",
   "editorEmojis": "Emojis",
   "editorImage": "Image",
   "editorItalic": "Italic",

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll } from "vitest";
 import { setup, fetch } from "@nuxt/test-utils/e2e";
 import { v4 as uuidv4 } from "uuid";
 import { setupDatabase } from "../../app/lib/databaseSetup";
+import { hashToken } from "../../server/utils/auth";
 
 const jsonPost = (path: string, body: unknown) =>
   fetch(path, {
@@ -61,9 +62,9 @@ describe("auth endpoints (e2e)", async () => {
     await db.execute(
       "INSERT INTO `session` (id, expiresAt, token, userId) VALUES (?,?,?,?), (?,?,?,?), (?,?,?,?)",
       [
-        `sess-reg-${run}`, future, REGULAR_TOKEN, regularUserId,
-        `sess-adm-${run}`, future, ADMIN_TOKEN, adminUserId,
-        `sess-out-${run}`, future, SIGNOUT_TOKEN, regularUserId,
+        `sess-reg-${run}`, future, hashToken(REGULAR_TOKEN), regularUserId,
+        `sess-adm-${run}`, future, hashToken(ADMIN_TOKEN), adminUserId,
+        `sess-out-${run}`, future, hashToken(SIGNOUT_TOKEN), regularUserId,
       ],
     );
   });
@@ -123,7 +124,7 @@ describe("auth endpoints (e2e)", async () => {
     );
     await db.execute(
       "INSERT INTO `verification` (id, identifier, value, expiresAt) VALUES (?,?,?,?)",
-      [uuidv4(), email, token, future],
+      [uuidv4(), email, hashToken(token), future],
     );
 
     const newPassword = "newpassword123";
@@ -136,6 +137,84 @@ describe("auth endpoints (e2e)", async () => {
     // The password really changed: signing in with it succeeds.
     const signInRes = await signIn({ email, password: newPassword });
     expect(signInRes.status).toBe(200);
+
+    // The link is spent.
+    const again = await jsonPost("/api/auth/reset-password", { token, newPassword });
+    expect(again.status).toBe(400);
+  });
+
+  it("stores a reset link only as its hash, and answers before the mail goes out", async () => {
+    const db = setupDatabase();
+    const email = `reset-request-${Date.now()}@example.com`;
+    await db.execute(
+      "INSERT INTO `user` (id, name, email, emailVerified, role) VALUES (?,?,?,?,?)",
+      [uuidv4(), "Reset Request", email, 1, "user"],
+    );
+    // The mail server here refuses connections. Before v0.41.0 the send was
+    // awaited for existing accounts only, so this answered 500 for an address
+    // with an account and 200 for one without.
+    const res = await jsonPost("/api/auth/request-password", { email });
+    expect(res.status).toBe(200);
+    const [rows]: any = await db.execute(
+      "SELECT `value` FROM `verification` WHERE `identifier` = ?",
+      [email],
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].value).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("stores only the hash of a session token", async () => {
+    const db = setupDatabase();
+    const email = `hashed-session-${Date.now()}@example.com`;
+    const created = await jsonPost("/api/auth/sign-up", { name: "Hashed", email, password: "password123" });
+    expect(created.status).toBe(200);
+    const res = await signIn({ email, password: "password123" });
+    expect(res.status).toBe(200);
+    const token = (await res.json())?.data?.sessionToken;
+    expect(typeof token).toBe("string");
+    const [rows]: any = await db.execute(
+      "SELECT s.`token` FROM `session` s JOIN `user` u ON u.id = s.userId WHERE u.email = ?",
+      [email],
+    );
+    expect(rows.map((r: any) => r.token)).toContain(hashToken(token));
+    expect(rows.map((r: any) => r.token)).not.toContain(token);
+    expect((await authGet("/api/auth/get-session", token)).status).toBe(200);
+  });
+
+  it("refuses a second account for an address, in any case", async () => {
+    const email = `taken-${Date.now()}@example.com`;
+    const first = await jsonPost("/api/auth/sign-up", { name: "First", email, password: "password123" });
+    expect(first.status).toBe(200);
+    const second = await jsonPost("/api/auth/sign-up", {
+      name: "Second",
+      email: email.toUpperCase(),
+      password: "password123",
+    });
+    expect(second.status).toBe(400);
+    expect((await second.json()).error).toBe("Registration failed");
+  });
+
+  it("frees an address an admin changed, for a new sign-up", async () => {
+    // Before v0.41.0 the local account kept the old address as its key, so
+    // signing up with the freed address hit a duplicate key and answered 500.
+    const db = setupDatabase();
+    const oldEmail = `before-${Date.now()}@example.com`;
+    const created = await jsonPost("/api/auth/sign-up", { name: "Mover", email: oldEmail, password: "password123" });
+    expect(created.status).toBe(200);
+    const userId = (await created.json())?.data?.user?.id;
+
+    const update = await authPost("/api/auth/admin/update", ADMIN_TOKEN, {
+      userId,
+      email: `after-${Date.now()}@example.com`,
+    });
+    expect(update.status).toBe(200);
+
+    const reuse = await jsonPost("/api/auth/sign-up", { name: "Newcomer", email: oldEmail, password: "password123" });
+    expect(reuse.status).toBe(200);
+
+    // And the moved account still signs in, at its new address.
+    const [[moved]]: any = await db.execute("SELECT `email` FROM `user` WHERE `id` = ?", [userId]);
+    expect((await signIn({ email: moved.email, password: "password123" })).status).toBe(200);
   });
 
   it("get-session returns 401 without authentication", async () => {

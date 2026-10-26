@@ -1,5 +1,6 @@
 import { setupDatabase } from "../../../../app/lib/databaseSetup";
 import { getUserSession } from "../../../utils/auth";
+import { dummyPasswordCheck } from "../../../utils/password";
 import bcrypt from "bcryptjs";
 
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -83,15 +84,9 @@ export default defineEventHandler(async (event) => {
 
     const userExists = users.length > 0;
 
-    // Always perform fake hash comparison to maintain constant time
-    const fakeHash = "$2a$10$fakehashforconstanttimecomparison";
-    if (password) {
-      await bcrypt.compare(password, fakeHash);
-    } else {
-      await bcrypt.compare(userId, fakeHash);
-    }
-
     if (!userExists) {
+      // The same cost as an update that sets a password.
+      await dummyPasswordCheck(password || userId);
       event.res.statusCode = 404;
       return { error: "USER_NOT_FOUND" };
     }
@@ -121,10 +116,8 @@ export default defineEventHandler(async (event) => {
 
         const emailExists = existingUsers.length > 0;
 
-        // Always perform fake hash comparison to maintain constant time
-        await bcrypt.compare(email || userId, fakeHash);
-
         if (emailExists) {
+          await dummyPasswordCheck(email);
           await conn.rollback();
           event.res.statusCode = 400;
           return { error: "EMAIL_ALREADY_TAKEN" };
@@ -132,6 +125,14 @@ export default defineEventHandler(async (event) => {
 
         updateFields.push("`email` = ?");
         updateValues.push(email);
+
+        // A reset link already mailed to the old address must not outlive the
+        // change: once the address is free, somebody else can sign up with it,
+        // and the link names the account by address.
+        await conn.execute(
+          "DELETE FROM `verification` WHERE `identifier` = ?",
+          [user.email],
+        );
       }
 
       if (role && role !== user.role) {
@@ -184,8 +185,13 @@ export default defineEventHandler(async (event) => {
       }
 
       await conn.commit();
-    } catch (error) {
+    } catch (error: any) {
       await conn.rollback();
+      // The address was taken between the check above and the update.
+      if (error?.code === "ER_DUP_ENTRY") {
+        event.res.statusCode = 400;
+        return { error: "EMAIL_ALREADY_TAKEN" };
+      }
       throw error;
     } finally {
       conn.release();

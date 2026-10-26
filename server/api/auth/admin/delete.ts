@@ -1,8 +1,8 @@
 import { setupDatabase } from "../../../../app/lib/databaseSetup";
 import { getUserSession } from "../../../utils/auth";
+import { dummyPasswordCheck } from "../../../utils/password";
 import { sendEmail } from "../../../../app/lib/sendEmail";
 import { getAccountDeletedEmail } from "../../../utils/translations";
-import bcrypt from "bcryptjs";
 
 const runtimeConfig = useRuntimeConfig();
 const appName = runtimeConfig.appName;
@@ -73,11 +73,8 @@ export default defineEventHandler(async (event) => {
 
       const userExists = users.length > 0;
 
-      // Always perform fake hash comparison to maintain constant time
-      const fakeHash = "$2a$10$fakehashforconstanttimecomparison";
-      await bcrypt.compare(userId, fakeHash);
-
       if (!userExists) {
+        await dummyPasswordCheck(userId);
         await conn.rollback();
         event.res.statusCode = 404;
         return { error: "USER_NOT_FOUND" };

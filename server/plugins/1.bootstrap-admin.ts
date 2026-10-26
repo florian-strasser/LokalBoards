@@ -112,9 +112,10 @@ export default defineNitroPlugin(async () => {
         "INSERT INTO `user` (`id`, `name`, `email`, `emailVerified`, `role`, `onboarded`) VALUES (?, ?, ?, ?, ?, ?)",
         [userId, name, email, 1, "admin", 0],
       );
+      // Keyed by the user's id, not the address, which can change (see sign-up.ts).
       await conn.execute(
         "INSERT INTO `account` (`id`, `accountId`, `providerId`, `userId`, `password`) VALUES (?, ?, ?, ?, ?)",
-        [uuidv4(), email, "local", userId, hashedPassword],
+        [uuidv4(), userId, "local", userId, hashedPassword],
       );
       await conn.commit();
     } catch (error) {

@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 import { setupDatabase } from "../../app/lib/databaseSetup";
-import { checkWebhookTarget } from "./webhookTarget";
+import { safeFetch, SafeFetchError } from "./safeFetch";
 import { authorizeBoard } from "./auth";
 
 // Outgoing webhooks. Subscriptions are per user AND per board: each collaborator
@@ -47,24 +47,26 @@ async function deliver(hook: any, body: string): Promise<void> {
     }
     // Re-checked per delivery, not just at subscription time: a hostname that
     // resolved publicly yesterday can point at an internal address today.
-    const target = await checkWebhookTarget(hook.url);
-    if (!target.ok) {
-      logger.error(`Webhook ${hook.id} skipped: ${target.reason}`);
-      return;
-    }
-    const res = await fetch(hook.url, {
+    // safeFetch checks inside the connection's own DNS lookup, so it is also
+    // the address actually connected to. A redirect is not followed — it is
+    // reported like any other non-2xx answer, so a 30x cannot bounce the
+    // request to an internal address.
+    const res = await safeFetch(hook.url, {
       method: "POST",
       headers,
       body,
-      redirect: "manual",
-      signal: AbortSignal.timeout(TIMEOUT_MS),
+      timeoutMs: TIMEOUT_MS,
+      // Only the status matters; the socket is released at once.
+      readBody: false,
     });
     if (!res.ok) {
       logger.error(`Webhook ${hook.id} -> ${hook.url} responded ${res.status}`);
     }
-    // Release the socket instead of holding it until the timeout fires.
-    await res.body?.cancel().catch(() => {});
   } catch (err) {
+    if (err instanceof SafeFetchError && err.code === "BLOCKED") {
+      logger.error(`Webhook ${hook.id} skipped: ${err.reason ?? err.message}`);
+      return;
+    }
     logger.error(`Webhook ${hook.id} delivery failed:`, err);
   }
 }

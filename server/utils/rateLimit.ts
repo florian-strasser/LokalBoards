@@ -1,4 +1,5 @@
-import { getRequestIP } from "h3";
+import { getRequestHeader } from "h3";
+import { isPublicAddress } from "./netGuard";
 
 // Simple in-memory fixed-window rate limiter.
 //
@@ -80,11 +81,74 @@ export function createRateLimiter(options: {
   return { consume, peek };
 }
 
-// Best-effort client IP, honouring X-Forwarded-For when present (LokalBoards is
-// typically run behind a reverse proxy). Falls back to a constant so the limiter
-// still functions if no IP can be determined.
-export function clientIp(event: any): string {
-  return getRequestIP(event, { xForwardedFor: true }) || "unknown";
+// --- Who is asking ----------------------------------------------------------
+//
+// Until v0.41.0 the client address was X-Forwarded-For's *first* entry,
+// whoever sent it. Both halves were wrong for a limiter: an instance reached
+// directly let anyone send the header and pick a fresh address per request,
+// stepping round the sign-in limit; and behind a proxy, the first entry is
+// whatever the client wrote before the proxy appended the address it saw.
+//
+// So the header is only believed from a proxy, and read from the right: each
+// proxy appends the address it saw, so behind N of them the client is the
+// N-th entry from the end. NUXT_TRUST_PROXY says how many there are — `true`
+// for one, a number for a chain (Cloudflare in front of nginx is 2), `false`
+// for none. Left unset it is `auto`: one proxy is believed when the
+// connection itself comes from loopback or a private network, which is where
+// the reverse proxy LokalBoards is normally run behind sits (nginx on the same
+// host, Traefik or Caddy on the Docker network), and nobody's header is
+// believed when the connection comes straight from the internet.
+
+/** How many proxies to believe: a count, or "auto" (see above). */
+export function trustedProxies(value?: unknown): number | "auto" {
+  const raw =
+    value !== undefined
+      ? value
+      : ((typeof useRuntimeConfig !== "undefined"
+          ? (useRuntimeConfig() as any).trustProxy
+          : undefined) ?? process.env.NUXT_TRUST_PROXY);
+  if (raw === true) return 1;
+  if (raw === false) return 0;
+  if (typeof raw === "number") {
+    return Number.isInteger(raw) && raw > 0 ? Math.min(raw, 10) : 0;
+  }
+  const text = String(raw ?? "").trim().toLowerCase();
+  if (text === "" || text === "auto") return "auto";
+  if (text === "true") return 1;
+  const hops = Number(text);
+  // Anything else, "false" and junk included, believes nobody.
+  return Number.isInteger(hops) && hops > 0 ? Math.min(hops, 10) : 0;
+}
+
+/** The client's entry in an X-Forwarded-For list, counted `hops` from the end. */
+export function forwardedClient(
+  header: string | null | undefined,
+  hops: number,
+): string | null {
+  if (!header || hops <= 0) return null;
+  const entries = header
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  if (!entries.length) return null;
+  return entries[Math.max(0, entries.length - hops)] ?? null;
+}
+
+// Best-effort client IP. Falls back to a constant so the limiter still
+// functions if no IP can be determined.
+export function clientIp(
+  event: any,
+  trust: number | "auto" = trustedProxies(),
+): string {
+  const peer: string =
+    event?.context?.clientAddress || event?.node?.req?.socket?.remoteAddress || "";
+  const hops =
+    trust === "auto" ? (peer && !isPublicAddress(peer) ? 1 : 0) : trust;
+  const forwarded = forwardedClient(
+    getRequestHeader(event, "x-forwarded-for"),
+    hops,
+  );
+  return forwarded || peer || "unknown";
 }
 
 function set429(event: any, result: RateLimitResult) {

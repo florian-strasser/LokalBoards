@@ -329,6 +329,7 @@ export async function findOrCreateUser(
   // password, an OpenID Connect identity and a SAML identity without any of
   // them standing on the others.
   providerId: "sso" | "saml" = "sso",
+  retried = false,
 ): Promise<{ userId: string } | { error: string }> {
   const db = setupDatabase();
   const { v4: uuidv4 } = await import("uuid");
@@ -361,10 +362,20 @@ export async function findOrCreateUser(
   }
 
   const userId = uuidv4();
-  await db.execute(
-    "INSERT INTO `user` (`id`, `name`, `email`, `emailVerified`, `role`, `onboarded`) VALUES (?, ?, ?, 1, ?, 0)",
-    [userId, profile.name, profile.email, profile.isAdmin ? "admin" : "user"],
-  );
+  try {
+    await db.execute(
+      "INSERT INTO `user` (`id`, `name`, `email`, `emailVerified`, `role`, `onboarded`) VALUES (?, ?, ?, 1, ?, 0)",
+      [userId, profile.name, profile.email, profile.isAdmin ? "admin" : "user"],
+    );
+  } catch (error: any) {
+    // `user.email` is unique: two first sign-ins for one address at once (a
+    // double click at the provider) and the other one made the account. Go
+    // round again and link to it, once.
+    if (error?.code === "ER_DUP_ENTRY" && !retried) {
+      return findOrCreateUser(profile, config, providerId, true);
+    }
+    throw error;
+  }
   await db.execute(
     "INSERT INTO `account` (`id`, `accountId`, `providerId`, `userId`) VALUES (?, ?, ?, ?)",
     [uuidv4(), profile.subject, providerId, userId],

@@ -85,6 +85,9 @@ export default defineNuxtConfig({
     boardsUrl: process.env.NUXT_BOARDS_URL || "http://localhost:3000",
     // How many days a login session stays valid. Defaults to 1 day.
     sessionMaxAgeDays: process.env.NUXT_SESSION_MAX_AGE_DAYS || "1",
+    // Which X-Forwarded-For entries the rate limits believe: "auto" (empty),
+    // true, false, or the number of proxies in front. See rateLimit.ts.
+    trustProxy: process.env.NUXT_TRUST_PROXY || "",
     // The first administrator, created at boot when the instance has none. See
     // server/plugins/1.bootstrap-admin.ts. Empty by default: an instance set up
     // through the sign-up form needs neither.
@@ -92,6 +95,7 @@ export default defineNuxtConfig({
     adminPassword: process.env.NUXT_ADMIN_PASSWORD || "",
     adminName: process.env.NUXT_ADMIN_NAME || "Administrator",
     mysqlHost: process.env.NUXT_MYSQL_HOST || "localhost",
+    mysqlPort: process.env.NUXT_MYSQL_PORT || "",
     mysqlDatabase: process.env.NUXT_MYSQL_DATABASE || "root",
     mysqlUser: process.env.NUXT_MYSQL_USER || "root",
     mysqlPassword: process.env.NUXT_MYSQL_PASSWORD || "root1234",

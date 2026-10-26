@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { secureCookiesFor } from "./secureCookies";
 import { setupDatabase } from "../../app/lib/databaseSetup";
 import { v4 as uuidv4 } from "uuid";
@@ -19,6 +20,17 @@ export const isStoredId = (value: unknown): value is string =>
   value.length > 0 &&
   value.length <= 36 &&
   /^[A-Za-z0-9_-]+$/.test(value);
+
+/**
+ * SHA-256 hex of a bearer token: a session token, or the token in a
+ * password-reset link. Only this is stored, so a copy of the database is not a
+ * way in. One fast hash is right for a random token (unlike a password), and it
+ * keeps the lookup an indexed equality match — the same reasoning, and the same
+ * CodeQL false positive, as `hashApiKey`.
+ */
+export function hashToken(token: string): string {
+  return createHash("sha256").update(String(token), "utf8").digest("hex");
+}
 
 export async function createSession(
   event: any,
@@ -52,13 +64,14 @@ export async function createSession(
     // Generate session token
     const sessionToken = uuidv4();
 
-    // Create session in database
+    // Create session in database. The cookie holds the token; the row holds
+    // only its hash.
     await db.execute(
       "INSERT INTO `session` (`id`, `expiresAt`, `token`, `userId`, `impersonatedBy`) VALUES (?, ?, ?, ?, ?)",
       [
         uuidv4(),
         new Date(Date.now() + maxAgeSeconds * 1000),
-        sessionToken,
+        hashToken(sessionToken),
         userIdStr,
         impersonatedBy,
       ],
@@ -172,7 +185,7 @@ export async function resolveSessionToken(
 
   const [sessions]: any = await db.execute(
     "SELECT * FROM `session` WHERE `token` = ? AND `expiresAt` > NOW()",
-    [sessionToken],
+    [hashToken(sessionToken)],
   );
   if (sessions.length === 0) {
     return { status: "invalid" };

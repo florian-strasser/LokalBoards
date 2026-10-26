@@ -9,6 +9,11 @@ const runtimeConfig: any =
   typeof useRuntimeConfig !== "undefined" ? useRuntimeConfig() : null;
 
 const mysqlHost = runtimeConfig?.mysqlHost ?? process.env.NUXT_MYSQL_HOST;
+// Optional; MySQL's own 3306 when unset. For a database on another port, and
+// for running the integration tests beside a MySQL that already has 3306.
+const mysqlPort = Number(
+  runtimeConfig?.mysqlPort || process.env.NUXT_MYSQL_PORT || 0,
+);
 const mysqlUser = runtimeConfig?.mysqlUser ?? process.env.NUXT_MYSQL_USER;
 const mysqlPassword =
   runtimeConfig?.mysqlPassword ?? process.env.NUXT_MYSQL_PASSWORD;
@@ -32,6 +37,7 @@ const mysqlSslRejectUnauthorized =
 
 const db = createPool({
   host: mysqlHost,
+  ...(Number.isInteger(mysqlPort) && mysqlPort > 0 ? { port: mysqlPort } : {}),
   user: mysqlUser,
   password: mysqlPassword,
   database: mysqlDatabase,
@@ -1390,6 +1396,113 @@ const migrations: Migration[] = [
           }
         }
       }
+    },
+  },
+
+  {
+    // Session tokens were stored as they are, so anybody holding a copy of the
+    // database — a backup, a dump handed to support — held a working sign-in
+    // for every live session. API keys, invitations and OAuth tokens have
+    // always been stored as a SHA-256 hash; sessions now are too (see
+    // `hashToken` in server/utils/auth.ts), in the same `token` column, the
+    // way 0002 did it for API keys.
+    //
+    // Live sessions keep working: the browser still holds the token, and the
+    // lookup now hashes what it is shown. Every token minted so far is a UUID
+    // (36 characters) and a digest is 64, so the length tells the two apart
+    // and a re-run cannot hash a hash. MySQL's SHA2(x, 256) is the same
+    // lowercase hex as Node's createHash('sha256') for these ASCII tokens.
+    id: "0033_hash_session_tokens",
+    up: async (db) => {
+      await db.execute(
+        "UPDATE `session` SET `token` = SHA2(`token`, 256) WHERE LENGTH(`token`) <> 64",
+      );
+    },
+  },
+
+  {
+    // Password-reset links, likewise: the `verification` row held the token
+    // from the link in plaintext. A link mailed before the upgrade still works
+    // — its token is hashed here and the reset endpoint hashes what it is sent.
+    id: "0034_hash_password_reset_tokens",
+    up: async (db) => {
+      await db.execute(
+        "UPDATE `verification` SET `value` = SHA2(`value`, 256) WHERE LENGTH(`value`) <> 64",
+      );
+    },
+  },
+
+  {
+    // One account per address. `user.email` only ever had a plain index, so
+    // the "is this address taken?" check before an insert was all that kept
+    // two accounts from sharing one, and two requests can both pass a check
+    // before either inserts. The unique index is the rule written down; the
+    // endpoints turn its duplicate-key error into their usual "taken" answer.
+    //
+    // An instance that already has a shared address has to lose it from all
+    // but one account before the index can exist. The one that keeps it is the
+    // one every lookup by address already finds — the lowest id, which is the
+    // order the old index returned them in — so nobody loses a sign-in they
+    // have. The others get `duplicate+<id>@lokalboards.invalid` (a domain that
+    // can never receive mail), keep their boards and their single sign-on
+    // links, and are named in the log, so an administrator can give them a
+    // real address. Nothing is deleted.
+    id: "0035_unique_user_email",
+    up: async (db) => {
+      const [shared]: any = await db.execute(
+        "SELECT `email`, MIN(`id`) AS keeper FROM `user` GROUP BY `email` HAVING COUNT(*) > 1",
+      );
+      for (const group of shared as any[]) {
+        const [others]: any = await db.execute(
+          "SELECT `id`, `email` FROM `user` WHERE `email` = ? AND `id` <> ?",
+          [group.email, group.keeper],
+        );
+        for (const other of others as any[]) {
+          const placeholder = `duplicate+${other.id}@lokalboards.invalid`;
+          await db.execute("UPDATE `user` SET `email` = ? WHERE `id` = ?", [
+            placeholder,
+            other.id,
+          ]);
+          logger.warn(
+            `Account ${other.id} shared the address ${other.email} with account ${group.keeper}; ` +
+              `it is now ${placeholder}. Give it a real address under Users.`,
+          );
+        }
+      }
+
+      // The 0012 index becomes unique under the same name, in one statement,
+      // so there is no moment without one. Guarded for a re-run.
+      const [index]: any = await db.execute(
+        "SELECT `NON_UNIQUE` FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'user' AND INDEX_NAME = 'user_email' LIMIT 1",
+      );
+      if (!index.length) {
+        await db.execute(
+          "ALTER TABLE `user` ADD UNIQUE KEY `user_email` (`email`)",
+        );
+      } else if (Number(index[0].NON_UNIQUE) === 1) {
+        await db.execute(
+          "ALTER TABLE `user` DROP INDEX `user_email`, ADD UNIQUE KEY `user_email` (`email`)",
+        );
+      }
+    },
+  },
+
+  {
+    // A local password's `account` row carried the address as its
+    // `accountId`. When an administrator changed somebody's address the row
+    // kept the old one, and since (providerId, accountId) is unique, the next
+    // person to sign up with the freed address hit a duplicate key and got a
+    // 500. A password belongs to the user, not to an address, so the local
+    // `accountId` is now the user's id, which never changes; nothing reads it
+    // back. This repairs the rows left behind by earlier changes as well.
+    //
+    // IGNORE skips the second local row of a user who somehow has two (the
+    // index would refuse it); that row is left as it was.
+    id: "0036_local_account_id_is_user_id",
+    up: async (db) => {
+      await db.execute(
+        "UPDATE IGNORE `account` SET `accountId` = `userId` WHERE `providerId` = 'local' AND `accountId` <> `userId`",
+      );
     },
   },
 

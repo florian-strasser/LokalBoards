@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   OWNER_ID,
   EDITOR_ID,
@@ -11,10 +12,17 @@ import {
 // edit-invited collaborator, plus a session per user (so the browser contexts
 // can authenticate by setting the session_token cookie directly). Never point
 // this at real data — it truncates tables.
+// Sessions are stored by the token's hash (hashToken in server/utils/auth.ts,
+// not imported here: it would open the pool before the env below is set). The
+// cookie the browser sets holds the token itself.
+const sha256 = (token: string) =>
+  createHash("sha256").update(token, "utf8").digest("hex");
+
 export default async function globalSetup() {
   // Map TEST_MYSQL_* onto the NUXT_MYSQL_* vars databaseSetup reads, BEFORE
   // importing it (its pool is created at import time).
   process.env.NUXT_MYSQL_HOST = process.env.TEST_MYSQL_HOST ?? "127.0.0.1";
+  process.env.NUXT_MYSQL_PORT = process.env.TEST_MYSQL_PORT ?? "";
   process.env.NUXT_MYSQL_USER = process.env.TEST_MYSQL_USER ?? "root";
   process.env.NUXT_MYSQL_PASSWORD = process.env.TEST_MYSQL_PASSWORD ?? "";
   process.env.NUXT_MYSQL_DATABASE =
@@ -71,8 +79,8 @@ export default async function globalSetup() {
   await db.execute(
     "INSERT INTO `session` (id, expiresAt, token, userId) VALUES (?,?,?,?), (?,?,?,?)",
     [
-      "pw-sess-owner", future, OWNER_TOKEN, OWNER_ID,
-      "pw-sess-editor", future, EDITOR_TOKEN, EDITOR_ID,
+      "pw-sess-owner", future, sha256(OWNER_TOKEN), OWNER_ID,
+      "pw-sess-editor", future, sha256(EDITOR_TOKEN), EDITOR_ID,
     ],
   );
 

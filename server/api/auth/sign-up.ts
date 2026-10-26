@@ -2,7 +2,8 @@ import { setupDatabase } from "../../../app/lib/databaseSetup";
 import bcrypt from "bcryptjs";
 import { v4 as uuidv4 } from "uuid";
 import { getCookie } from "h3";
-import { createSession } from "../../utils/auth";
+import { createSession, hashToken } from "../../utils/auth";
+import { dummyPasswordCheck } from "../../utils/password";
 import { sendEmail } from "../../../app/lib/sendEmail";
 import { getWelcomeSignupEmail } from "../../utils/translations";
 import { hashInviteToken } from "../../utils/inviteToken";
@@ -67,7 +68,7 @@ export default defineEventHandler(async (event) => {
         const db = await setupDatabase();
         const [sessions] = await db.execute(
           "SELECT * FROM `session` WHERE `token` = ? AND `expiresAt` > NOW()",
-          [sessionToken],
+          [hashToken(sessionToken)],
         );
 
         if (sessions.length > 0) {
@@ -120,12 +121,10 @@ export default defineEventHandler(async (event) => {
 
       const userExists = existingUsers.length > 0;
 
-      // Always perform fake hash comparison to maintain constant time
-      const fakeHash = "$2a$10$fakehashforconstanttimecomparison";
-      await bcrypt.compare(password, fakeHash);
-
-      // HIGH FIX: Generic error message to prevent user enumeration
+      // HIGH FIX: Generic error message to prevent user enumeration. The
+      // refusal costs what hashing the new password below costs.
       if (userExists) {
+        await dummyPasswordCheck(password);
         event.res.statusCode = 400;
         return { error: "Registration failed" };
       }
@@ -148,10 +147,13 @@ export default defineEventHandler(async (event) => {
           [userId, name, email, 0],
         );
 
-        // Create an account entry for the user
+        // Create an account entry for the user. A password belongs to the
+        // user, not to an address, so the local `accountId` is the user's id:
+        // the address can change, and the old one must be free to sign up
+        // with again (the `account_provider_subject` index is unique).
         await conn.execute(
           "INSERT INTO `account` (`id`, `accountId`, `providerId`, `userId`, `password`) VALUES (?, ?, ?, ?, ?)",
-          [uuidv4(), email, "local", userId, hashedPassword],
+          [uuidv4(), userId, "local", userId, hashedPassword],
         );
 
         // The invitation is honoured and spent in the same transaction that
@@ -215,9 +217,16 @@ export default defineEventHandler(async (event) => {
             callbackURL,
           },
         };
-      } catch (error) {
+      } catch (error: any) {
         // Rollback transaction on any error
         await conn.rollback();
+        // Somebody registered the same address between the check above and
+        // the insert; `user.email` is unique, so the database said no. The
+        // same answer as an address that was already taken.
+        if (error?.code === "ER_DUP_ENTRY") {
+          event.res.statusCode = 400;
+          return { error: "Registration failed" };
+        }
         throw error;
       } finally {
         conn.release();

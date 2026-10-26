@@ -1,5 +1,6 @@
 import { setupDatabase } from "../../../app/lib/databaseSetup";
 import { deleteCookie, getCookie } from "h3";
+import { hashToken } from "../../utils/auth";
 
 export default defineEventHandler(async (event) => {
   const method = event.req.method;
@@ -26,10 +27,10 @@ export default defineEventHandler(async (event) => {
 
     const db = await setupDatabase();
 
-    // Delete the session from database
+    // Delete the session from database (stored by its hash)
     const [result] = await db.execute(
       "DELETE FROM `session` WHERE `token` = ?",
-      [sessionToken],
+      [hashToken(sessionToken)],
     );
 
     // LOW FIX: Only return success if a session was actually deleted

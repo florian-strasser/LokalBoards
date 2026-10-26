@@ -183,6 +183,8 @@
   "editorBulletList": "Elenco puntato",
   "editorCheckList": "Elenco di controllo",
   "editorCodeblock": "Blocco di codice",
+  "editorEmojiNone": "Nessuna emoji trovata",
+  "editorEmojiSearch": "Cerca emoji",
   "editorEmojis": "Emoji",
   "editorImage": "Immagine",
   "editorItalic": "Corsivo",

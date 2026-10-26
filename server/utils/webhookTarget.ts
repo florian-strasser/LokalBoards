@@ -1,108 +1,71 @@
-import { lookup } from "node:dns/promises";
-import { isIP } from "node:net";
+import { checkPublicUrl, isPublicAddress, type LookupFunction } from "./netGuard";
 
 // The webhook URL is supplied by a user but fetched by the SERVER, from inside
 // whatever network the instance runs in. Without a check that is a
 // server-side request forgery primitive: cloud metadata (169.254.169.254),
 // admin panels on localhost, anything on the private LAN. So a target is only
 // accepted if it is http(s) AND every address its host resolves to is a public
-// unicast address.
+// unicast address. netGuard.ts decides what counts as public.
 //
-// Checked twice on purpose: when the subscription is created (so the user gets
-// an immediate error) and again before each delivery (so a hostname that later
-// starts resolving to an internal address — DNS rebinding — is still refused).
-
-const MAX_URL_LENGTH = 2048;
-
-function isPrivateV4(ip: string): boolean {
-  const p = ip.split(".").map(Number);
-  if (p.length !== 4 || p.some((n) => Number.isNaN(n))) return true;
-  const [a, b] = p;
-  if (a === 0 || a === 10 || a === 127) return true; // this-network, private, loopback
-  if (a === 169 && b === 254) return true; // link-local incl. cloud metadata
-  if (a === 172 && b >= 16 && b <= 31) return true; // private
-  if (a === 192 && b === 168) return true; // private
-  if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
-  if (a === 192 && b === 0) return true; // IETF protocol assignments
-  if (a >= 224) return true; // multicast, reserved, broadcast
-  return false;
-}
-
-function isPrivateV6(ip: string): boolean {
-  const addr = ip.toLowerCase().split("%")[0];
-  if (addr === "::" || addr === "::1") return true; // unspecified, loopback
-  if (addr.startsWith("fe80")) return true; // link-local
-  if (/^f[cd]/.test(addr)) return true; // unique local
-  if (addr.startsWith("ff")) return true; // multicast
-  // IPv4-mapped (::ffff:127.0.0.1) must be judged by its v4 half.
-  const mapped = addr.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-  if (mapped) return isPrivateV4(mapped[1]);
-  return false;
-}
-
-export function isPrivateAddress(ip: string): boolean {
-  const kind = isIP(ip);
-  if (kind === 4) return isPrivateV4(ip);
-  if (kind === 6) return isPrivateV6(ip);
-  return true; // not an IP literal we understand → refuse
-}
+// This is the check with a reason, run when the subscription is created so the
+// user gets an immediate, readable error. It is not what keeps a delivery
+// safe: a hostname that resolved publicly yesterday can point at an internal
+// address today, or between this check and the connect. Deliveries go through
+// safeFetch, which runs the same rules inside the connection's own DNS lookup.
 
 export type WebhookTargetCheck = { ok: true } | { ok: false; reason: string };
 
+/** Whether an address is outside every public unicast range (or not an IP at all). */
+export function isPrivateAddress(ip: string): boolean {
+  return !isPublicAddress(ip);
+}
+
 /**
- * Validate a webhook URL: shape, scheme, length, and that its host does not
- * resolve into a private/loopback/link-local range.
+ * Validate a webhook URL: shape, scheme, length, no credentials, and that its
+ * host does not resolve into a private, loopback, link-local or otherwise
+ * reserved range.
  */
 export async function checkWebhookTarget(
   url: unknown,
+  opts: { lookup?: LookupFunction } = {},
 ): Promise<WebhookTargetCheck> {
-  if (!url || typeof url !== "string" || url.length > MAX_URL_LENGTH) {
+  if (!url || typeof url !== "string") {
     return {
       ok: false,
       reason: "A webhook URL (max 2048 characters) is required",
     };
   }
 
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return { ok: false, reason: "The webhook URL is not a valid URL" };
-  }
+  const check = await checkPublicUrl(url, { lookup: opts.lookup });
+  if (check.ok) return { ok: true };
 
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    return {
-      ok: false,
-      reason: "The webhook URL must start with http:// or https://",
-    };
+  switch (check.reason) {
+    case "URL_TOO_LONG":
+      return {
+        ok: false,
+        reason: "A webhook URL (max 2048 characters) is required",
+      };
+    case "INVALID_URL":
+      return { ok: false, reason: "The webhook URL is not a valid URL" };
+    case "UNSUPPORTED_PROTOCOL":
+      return {
+        ok: false,
+        reason: "The webhook URL must start with http:// or https://",
+      };
+    case "CREDENTIALS_IN_URL":
+      // fetch() refused these at delivery anyway; now they are refused where
+      // the user can see why. A receiver that wants a secret gets the signature.
+      return {
+        ok: false,
+        reason:
+          "The webhook URL must not contain a user name or password; use the secret instead",
+      };
+    case "DNS_FAILED":
+      return { ok: false, reason: "The webhook host could not be resolved" };
+    default:
+      return {
+        ok: false,
+        reason: "The webhook URL must point to a public address",
+      };
   }
-
-  // Strip the brackets IPv6 literals carry in a URL host.
-  const host = parsed.hostname.replace(/^\[|\]$/g, "");
-
-  if (isIP(host)) {
-    return isPrivateAddress(host)
-      ? { ok: false, reason: "The webhook URL must point to a public address" }
-      : { ok: true };
-  }
-
-  let addresses: { address: string }[];
-  try {
-    addresses = await lookup(host, { all: true });
-  } catch {
-    return { ok: false, reason: "The webhook host could not be resolved" };
-  }
-
-  if (addresses.length === 0) {
-    return { ok: false, reason: "The webhook host could not be resolved" };
-  }
-  // Every address must be public — one internal answer is enough to abuse.
-  if (addresses.some((a) => isPrivateAddress(a.address))) {
-    return {
-      ok: false,
-      reason: "The webhook URL must point to a public address",
-    };
-  }
-
-  return { ok: true };
 }

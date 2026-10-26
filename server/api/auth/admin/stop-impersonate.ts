@@ -1,6 +1,6 @@
 import { getCookie } from "h3";
 import { setupDatabase } from "../../../../app/lib/databaseSetup";
-import { getUserSession, createSession } from "../../../utils/auth";
+import { getUserSession, createSession, hashToken } from "../../../utils/auth";
 
 // End an impersonation session and return to the original admin account. The
 // current session must be an impersonation session (its `impersonatedBy` names
@@ -43,7 +43,7 @@ export default defineEventHandler(async (event) => {
     const impersonationToken = getCookie(event, "session_token");
     if (impersonationToken) {
       await db.execute("DELETE FROM `session` WHERE `token` = ?", [
-        impersonationToken,
+        hashToken(impersonationToken),
       ]);
     }
 

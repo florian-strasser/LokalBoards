@@ -183,6 +183,8 @@
   "editorBulletList": "Opsommingstekenlijst",
   "editorCheckList": "Controlelijst",
   "editorCodeblock": "Codeblok",
+  "editorEmojiNone": "Geen emoji gevonden",
+  "editorEmojiSearch": "Emoji zoeken",
   "editorEmojis": "Emoji's",
   "editorImage": "Afbeelding",
   "editorItalic": "Cursief",
