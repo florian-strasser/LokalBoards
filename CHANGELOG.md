@@ -1,3 +1,12 @@
+## v0.41.1
+
+### Security
+
+- **`node-forge` is on 1.4.2, and the last advisory that had nowhere to go is closed.** It was open for seven weeks — a signature check that accepted more than it should — with every published release affected; 1.4.1 and 1.4.2 came out on 27 October. It makes the development server's HTTPS certificate and is not in the image. Nothing had to be forced: what pulls it in already asked for any 1.4, so this is a lockfile change in the app and in the documentation site, and making a certificate with it was tried before it went in.
+- **Vue I18n is on 11.4.16.** It is the library every translated word on the page goes through, and two advisories landed on it: `escapeParameter` leaving named values unescaped when a list is passed in the same call, and translation messages getting script through `srcdoc`. Neither reaches the app — it does not switch `escapeParameter` on, its messages are its own and carry no `srcdoc`, and the one translation it renders as HTML takes no values — but it is on the fixed release. The `@intlify` packages it is made of move with it, and so does the build plugin that compiles the messages, whose newer release no longer brings its own copy of Vue I18n 10 along, a version no fixed release exists for.
+- **In the toolchain only:** `@hono/node-server` 2.1.5 (its `serveStatic`, which the app does not use, decoded a path twice) and `qs` 6.17.1.
+- **What stays open is `deepmerge`,** rated low: merging objects could poison a prototype. It is in Nitro's bundler plugin, at build time only, and 4.3.1 is the newest release there is.
+
 ## v0.41.0
 
 ### Security
