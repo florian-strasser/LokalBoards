@@ -1,5 +1,9 @@
 ## v0.41.1
 
+### Improvements
+
+- **No emoji button on a touch screen.** A phone's keyboard has an emoji key of its own, one tap from the text being typed, and on an iPhone the picker did not work out beside it — so on a screen worked by touch the editor's toolbar no longer offers one. It is decided by what the screen can do rather than by what the device is called: a touch screen without a mouse pointer hides it, which takes in Android phones for the same reason, and an iPad with a trackpad keeps it. Typing `:` and a name still lists the emoji there, as everywhere.
+
 ### Security
 
 - **`node-forge` is on 1.4.2, and the last advisory that had nowhere to go is closed.** It was open for seven weeks — a signature check that accepted more than it should — with every published release affected; 1.4.1 and 1.4.2 came out on 27 October. It makes the development server's HTTPS certificate and is not in the image. Nothing had to be forced: what pulls it in already asked for any 1.4, so this is a lockfile change in the app and in the documentation site, and making a certificate with it was tried before it went in.

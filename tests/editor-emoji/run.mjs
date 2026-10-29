@@ -296,6 +296,33 @@ try {
     check("a smiley typed as :D still turns into one", (await look()).emojis === 3, JSON.stringify((await look()).text));
 
     check("the editor has nothing to complain of in the console", complaints.length === 0, complaints[0]?.slice(0, 80) ?? "");
+
+    // --- On a touch screen -------------------------------------------------
+    // The keyboard has an emoji key there, so the toolbar has no button for
+    // it; `:` and a name still work.
+    const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    await phone.addCookies([{ name: "session_token", value: cookie.split("=").slice(1).join("="), domain: "127.0.0.1", path: "/" }]);
+    const touch = await phone.newPage();
+    await touch.goto(`${BASE}/board/${board.insertId}?card=${card.insertId}`, { waitUntil: "domcontentloaded" });
+    await touch.waitForTimeout(2500);
+    const coarse = await touch.evaluate(() => matchMedia("(hover: none) and (pointer: coarse)").matches);
+    await touch.getByRole("button", { name: "Write a comment" }).click();
+    await touch.waitForTimeout(700);
+    const touchToolbar = touch.locator(".card-modal .editor-toolbar").last();
+    check("a touch screen is taken for one", coarse);
+    check("and its toolbar has no emoji button",
+      (await touchToolbar.locator("button:has(svg.lucide-smile)").isVisible()) === false &&
+      (await touchToolbar.locator("button:has(svg.lucide-bold)").isVisible()) === true);
+    await touch.locator(".card-modal .tiptap").last().tap();
+    await touch.keyboard.type("Hallo :rocke");
+    await touch.waitForTimeout(400);
+    const touchList = await touch.locator('[role="listbox"] [role="option"]').first().textContent().catch(() => null);
+    check("but : and a name still list the emoji", /🚀/.test(touchList ?? ""), JSON.stringify(touchList));
+    await phone.close();
+
+    // And with a mouse, the button is there.
+    check("with a mouse the button is there",
+      await page.locator(".card-modal .editor-toolbar").last().locator("button:has(svg.lucide-smile)").isVisible());
     await browser.close();
     browser = null;
   }

@@ -403,6 +403,17 @@ img.ProseMirror-separator {
     font-size: 1.25rem;
     line-height: 1;
 }
+/* No emoji button on a touch screen. The keyboard there has an emoji key of its
+ * own, one tap from the text being typed, and on an iPhone the picker did not
+ * work out beside it. Asked as "no hover, coarse pointer" rather than by
+ * device, so an iPad with a trackpad, which has both, keeps the button, and an
+ * Android phone, which has neither, loses it for the same reason an iPhone
+ * does. `:` and a name still work everywhere. */
+@media (hover: none) and (pointer: coarse) {
+    .editor-emoji {
+        display: none;
+    }
+}
 /* The rich-text editor shares the same skin as the form controls. */
 .tiptap {
     padding: 1.5rem;

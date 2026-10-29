@@ -103,11 +103,13 @@
                     <Code class="size-5" />
                 </button>
             </li>
-            <li>
+            <li class="editor-emoji">
                 <!-- A popover rather than a row in the toolbar: it floats over
                      the text, so it can hold every emoji instead of the eight
                      that fitted before the row started pushing the editor down.
-                     Typing `:` and a name finds them too, without the mouse. -->
+                     Typing `:` and a name finds them too, without the mouse.
+                     Not on a touch screen (`editor-emoji` in main.css): the
+                     keyboard there has emoji of its own. -->
                 <PopoverMenu>
                     <template #trigger>
                         <button
