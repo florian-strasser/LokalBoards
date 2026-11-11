@@ -12,7 +12,7 @@
 
 import { stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import archiver from "archiver";
+import { ZipArchive } from "archiver";
 
 export const EXPORT_FORMAT = "lokalboards.board";
 export const EXPORT_FORMAT_VERSION = 1;
@@ -66,7 +66,7 @@ export function downloadDisposition(filename: string): string {
 }
 
 export function createZip() {
-  return archiver("zip", { zlib: { level: 6 } });
+  return new ZipArchive({ zlib: { level: 6 } });
 }
 
 export function addEntries(archive: any, entries: ExportEntry[]) {

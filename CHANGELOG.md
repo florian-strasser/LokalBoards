@@ -1,3 +1,11 @@
+## v0.42.1
+
+### Security
+
+- **Nuxt 4.6.4.** It closes a hole where `..` in a request's path got past the path checks in `server/middleware`. LokalBoards has one such check, the MCP server's sign-in, and a request that slipped past it would still have been turned away by every tool, which needs a signed-in caller — so nothing was open, but the check is whole again. The other three Nuxt advisories of the week are in its development server, which only `npm run dev` runs. The documentation site is on 4.6.4 too.
+- **The build tools are past their advisories.** `minimatch` 11 and `glob` 14 replace the versions with a denial of service and an AbortSignal bypass — forced for the packages that have not moved yet, after checking they use only what both versions have — `node-forge` 1.4.3 closes four more advisories in the development server's certificates, and `fast-xml-parser` its own in the documentation site's sitemap. None of it is in the image.
+- **`archiver` 8** makes the zips of a board export, the same version Nitro now uses, so there is one copy instead of two and the older one's dependencies are gone. Its interface changed by one line in `boardExport.ts`; the exports are the same files.
+
 ## v0.42.0
 
 ### New Features
