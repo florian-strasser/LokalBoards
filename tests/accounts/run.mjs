@@ -117,19 +117,20 @@ try {
   await c.execute("INSERT INTO verification (id, identifier, value, expiresAt) VALUES (?,?,?, NOW() + INTERVAL 1 DAY)",
     [randomUUID(), "anna@example.test", createHash("sha256").update(annaLink).digest("hex")]);
   const annaReset = await post("/api/auth/reset-password", { token: annaLink, newPassword: "anna's new password" });
-  const [[annaSso]] = await c.query("SELECT password FROM account WHERE userId = ? AND providerId = 'sso'", [anna.id]);
+  // Whether there is one, never what it is: a password hash has no business in a log.
+  const [[annaSso]] = await c.query("SELECT password IS NULL AS none FROM account WHERE userId = ? AND providerId = 'sso'", [anna.id]);
   check("a reset changes the password of the account's own sign-in", annaReset.status === 200 && (await localPasswordIs(anna.id, "anna's new password")), String(annaReset.status));
-  check("and leaves its SSO sign-in without one", annaSso.password === null, String(annaSso.password));
+  check("and leaves its SSO sign-in without one", annaSso.none === 1);
   // A reset ends every session, so Anna signs in again.
   anna.token = tokenOf(await post("/api/auth/sign-in", { email: "anna@example.test", password: "anna's new password" }));
   anna.cookie = `session_token=${anna.token}`;
 
   const set = await post("/api/auth/admin/update", { userId: ssoId, password: "set by the admin" }, { cookie: boss.cookie });
-  const [samRows] = await c.query("SELECT providerId, password FROM account WHERE userId = ? ORDER BY providerId", [ssoId]);
+  const [samRows] = await c.query("SELECT providerId, password IS NULL AS none FROM account WHERE userId = ? ORDER BY providerId", [ssoId]);
   check("an administrator setting a password gives an SSO account a local sign-in",
     set.status === 200 && (await localPasswordIs(ssoId, "set by the admin")), String(set.status));
   check("next to its SSO sign-in, which stays without a password",
-    samRows.length === 2 && samRows.find((r) => r.providerId === "sso").password === null && await bcrypt.compare("set by the admin", samRows.find((r) => r.providerId === "local").password),
+    samRows.length === 2 && samRows.find((r) => r.providerId === "sso").none === 1 && samRows.find((r) => r.providerId === "local").none === 0,
     JSON.stringify(samRows.map((r) => r.providerId)));
 
   // ------------------------------------------------------- impersonation ----
