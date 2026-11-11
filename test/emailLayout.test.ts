@@ -11,7 +11,7 @@ import {
   getBoardInviteEmail,
   getAccountDeletedEmail,
   getEmailMessage,
-} from "../server/utils/translations";
+} from "../server/utils/emails";
 
 describe("email layout", () => {
   it("wraps content in the shared shell", () => {

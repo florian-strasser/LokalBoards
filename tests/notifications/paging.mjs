@@ -143,7 +143,7 @@ await page.context().addCookies([{ name: cookie.split("=")[0], value: cookie.spl
 await c.execute("UPDATE `user` SET `onboarded` = 1");
 await page.goto(`${BASE}/dashboard`, { waitUntil: "networkidle" });
 await page.waitForTimeout(1000);
-await page.locator('button[aria-label="Notifications"]:visible').first().click();
+await page.locator('[aria-label="Notifications"]:visible').first().click();
 await page.waitForTimeout(800);
 const items = page.locator('div.fixed a[href^="/board/"]');
 check("twenty-five in the panel", await items.count() === 25, `${await items.count()}`);

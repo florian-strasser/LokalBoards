@@ -182,7 +182,7 @@
     </div>
 </template>
 <script setup lang="ts">
-import { Trash, Eye, EyeOff, Pencil, PencilOff, Check } from "lucide-vue-next";
+import { Trash, Eye, EyeOff, Pencil, PencilOff, Check } from "@lucide/vue";
 const props = defineProps({
     boardID: String,
     invitations: Array,

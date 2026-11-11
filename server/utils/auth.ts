@@ -1,8 +1,7 @@
-import { createHash } from "node:crypto";
 import { secureCookiesFor } from "./secureCookies";
 import { setupDatabase } from "../../app/lib/databaseSetup";
 import { v4 as uuidv4 } from "uuid";
-import { setCookie, getCookie } from "h3";
+import { createError, setCookie, getCookie } from "h3";
 import { resolveBoardAccess, type BoardAccess } from "./boardAccess";
 import { hashApiKey } from "./apiKey";
 import { logger } from "./logger";
@@ -22,14 +21,31 @@ export const isStoredId = (value: unknown): value is string =>
   /^[A-Za-z0-9_-]+$/.test(value);
 
 /**
- * SHA-256 hex of a bearer token: a session token, or the token in a
- * password-reset link. Only this is stored, so a copy of the database is not a
- * way in. One fast hash is right for a random token (unlike a password), and it
- * keeps the lookup an indexed equality match — the same reasoning, and the same
- * CodeQL false positive, as `hashApiKey`.
+ * SHA-256 hex of a bearer token: a session token, the token in a
+ * password-reset or invitation link, an OAuth code or token. Only this is
+ * stored, so a copy of the database is not a way in. It is `hashApiKey` itself
+ * — see apiKey.ts for why one fast hash is right for a random token.
  */
-export function hashToken(token: string): string {
-  return createHash("sha256").update(String(token), "utf8").digest("hex");
+export const hashToken: (token: string) => string = hashApiKey;
+
+/** The session token a request carries: a bearer token, or else the cookie. */
+export function sessionTokenOf(event: any): string | undefined {
+  return (
+    event.headers.get("authorization")?.replace("Bearer ", "") ||
+    getCookie(event, "session_token")
+  );
+}
+
+/**
+ * Whether the instance is down to one administrator (or none). Demoting an
+ * admin is refused then: an instance with no admin has nobody who can make
+ * one. Takes the pool or a transaction's connection.
+ */
+export async function onlyOneAdminLeft(db: any): Promise<boolean> {
+  const [rows]: any = await db.execute(
+    "SELECT COUNT(*) AS c FROM `user` WHERE `role` = 'admin'",
+  );
+  return (rows[0]?.c ?? 0) <= 1;
 }
 
 export async function createSession(
@@ -156,12 +172,7 @@ export type SessionResult =
   | { status: "invalid" };
 
 export async function resolveSession(event: any): Promise<SessionResult> {
-  // Token from the Authorization header (Bearer) or the session cookie.
-  const sessionToken =
-    event.headers.get("authorization")?.replace("Bearer ", "") ||
-    getCookie(event, "session_token");
-
-  return resolveSessionToken(sessionToken);
+  return resolveSessionToken(sessionTokenOf(event));
 }
 
 /**
@@ -287,6 +298,24 @@ export async function getApiKeyUser(event: any) {
   }
 }
 
+/**
+ * Who is uploading a file: the session, or an API key in either header (the
+ * MCP clients that can only send a bearer token upload too). A read-only key
+ * may not upload, as it may not write anywhere else. Throws 401 or 403.
+ */
+export async function requireUploader(event: any): Promise<string> {
+  const session = await getUserSession(event);
+  if (session?.user?.id) return String(session.user.id);
+  const key = await getApiKeyUser(event);
+  if (!key?.user?.id) {
+    throw createError({ statusCode: 401, statusMessage: "Unauthorized" });
+  }
+  if (!apiKeyAllowsWrite(key.permissions, event)) {
+    throw createError({ statusCode: 403, statusMessage: READ_ONLY_KEY.error });
+  }
+  return String(key.user.id);
+}
+
 // A failed authorization check carries the HTTP status and a (deliberately
 // generic) error message the caller should return verbatim.
 export type AuthFailure = { ok: false; status: number; error: string };
@@ -312,8 +341,9 @@ const READ_ONLY_KEY: AuthFailure = {
 
 /**
  * Whether an API key may perform this request. `permissions` is the parsed
- * array stored with the key (e.g. ["read"]); null means an older key with no
- * scope recorded, which keeps full access so existing integrations don't break.
+ * array stored with the key: ["read"] for a read-only key, and null for a
+ * full-access one — which is how create.ts stores those, and how every key
+ * made before scopes existed was stored too.
  */
 export function apiKeyAllowsWrite(permissions: any, event: any): boolean {
   if (!Array.isArray(permissions)) return true;
@@ -343,9 +373,8 @@ export async function resolveUserId(event: any): Promise<UserResolution> {
 
     // A read-only key must be read-only everywhere, not just over MCP. Enforce
     // it at the single choke point every data endpoint goes through, keyed on
-    // the HTTP method: GET/HEAD read, everything else writes. Keys created
-    // before permissions existed have `permissions === null` and stay
-    // unrestricted.
+    // the HTTP method: GET/HEAD read, everything else writes. A full-access key
+    // has `permissions === null` and is not restricted.
     if (!apiKeyAllowsWrite(data.key.permissions, event)) return READ_ONLY_KEY;
 
     userIdFromApiKey = data.key.userId;

@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   getWelcomeSignupEmail,
   getWelcomeAdminEmail,
-} from "../server/utils/translations";
+} from "../server/utils/emails";
 
 describe("getWelcomeSignupEmail", () => {
   it("fills the name/appName and links the login URL, no credentials", () => {

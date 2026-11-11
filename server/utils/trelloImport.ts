@@ -8,7 +8,7 @@ import type { ImportBoard } from "./boardImport";
 
 // Guard rails so a pathological board can't create an unbounded amount of data.
 export const MAX_LISTS = 500;
-export const MAX_CARDS = 5000;
+const MAX_CARDS = 5000;
 const NAME_MAX = 255;
 
 // Pull the board shortLink (or 24-char id) out of a pasted Trello URL. Accepts

@@ -97,11 +97,3 @@
     </div>
   </section>
 </template>
-
-<script setup lang="ts">
-import { Github, Mail } from "lucide-vue-next";
-
-// The same repository the header points at. Two places, one address — if it
-// ever moves, it moves in both.
-const repository = "https://github.com/florian-strasser/LokalBoards";
-</script>

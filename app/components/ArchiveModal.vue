@@ -87,7 +87,7 @@
 </template>
 
 <script setup lang="ts">
-import { Layers, Trash2 } from "lucide-vue-next";
+import { Layers, Trash2 } from "@lucide/vue";
 
 const props = defineProps({
     // A board's archive holds its areas and its cards. Without one, this is the

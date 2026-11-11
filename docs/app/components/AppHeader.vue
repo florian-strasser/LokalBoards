@@ -108,7 +108,7 @@
               rel="noopener"
               class="bg-primary hover:bg-primary-hover flex items-center justify-center gap-2 rounded-full px-6 py-3 text-center font-medium text-white"
               @click="open = false"
-              ><Github class="size-[1.15em]" :stroke-width="2" />GitHub</a
+              ><GithubIcon class="size-[1.15em]" />GitHub</a
             >
           </li>
         </ul>
@@ -167,7 +167,7 @@
             : 'bg-primary hover:bg-primary-hover text-white'
         "
         class="hidden items-center gap-2 rounded-full px-6 py-3 transition-colors md:inline-flex md:justify-self-end"
-        ><Github class="size-[1.15em]" :stroke-width="2" />GitHub</a
+        ><GithubIcon class="size-[1.15em]" />GitHub</a
       >
 
       <!-- Two bars that cross into a close mark, so the control never changes
@@ -193,7 +193,7 @@
 </template>
 
 <script setup lang="ts">
-import { ChevronDown, Github } from "lucide-vue-next";
+import { ChevronDown } from "@lucide/vue";
 // The four homepage sections plus the documentation. They are absolute paths
 // rather than bare fragments so they work from the docs and API pages too —
 // Lenis is set up with `anchors: true`, so the scroll to them is the smooth

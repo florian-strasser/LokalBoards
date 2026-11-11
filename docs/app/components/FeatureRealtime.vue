@@ -134,7 +134,7 @@ import {
   MessageSquareText,
   Plus,
   Trash2,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 
 // The board from the demo screenshots, so the site and the screenshots on it
 // are showing the same thing.

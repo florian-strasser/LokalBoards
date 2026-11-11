@@ -1,10 +1,9 @@
-import { getApiKeyUser } from "../utils/auth";
-
 // The MCP server that lets AI agents work with LokalBoards. Every request is
-// authenticated by the caller's API key (`x-api-key`, or a bearer token for
-// clients that can only send `Authorization`); the middleware
-// resolves the key to a user + its permission scopes and stashes them on the
-// event context for the tools (see server/mcp/helpers.ts).
+// authenticated by an API key (`x-api-key`, or a bearer token for clients that
+// can only send `Authorization`) or an OAuth access token; the middleware in
+// server/middleware/mcp-auth.ts resolves either to a user and its permission
+// scopes and stashes them on the event context for the tools (see
+// server/utils/mcpHelpers.ts).
 export default defineMcpHandler({
   instructions: [
     "LokalBoards is a Kanban project-management tool. Use these tools to read and",
@@ -61,12 +60,6 @@ export default defineMcpHandler({
     "Errors come back as `CODE: message` where CODE is one of UNAUTHORIZED,",
     "FORBIDDEN, NOT_FOUND, VALIDATION, INTERNAL.",
   ].join("\n"),
-  middleware: async (event) => {
-    const result = await getApiKeyUser(event);
-    if (result) {
-      event.context.user = result.user;
-      event.context.userId = result.user.id;
-      event.context.apiKeyPermissions = result.permissions ?? null;
-    }
-  },
+  // Who is calling is settled before this runs: server/middleware/mcp-auth.ts
+  // reads the API key or the OAuth token and answers 401 for neither.
 });

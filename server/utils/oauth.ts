@@ -1,5 +1,7 @@
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { setupDatabase } from "../../app/lib/databaseSetup";
+import { hashToken } from "./auth";
+import { pkceChallenge, safeEqual } from "./sso";
 import { safeFetch, SafeFetchError } from "./safeFetch";
 import type { LookupFunction } from "./netGuard";
 import { logger } from "./logger";
@@ -20,7 +22,7 @@ export const SCOPE_READ = "boards:read";
 export const SCOPE_WRITE = "boards:write";
 export const SUPPORTED_SCOPES = [SCOPE_READ, SCOPE_WRITE];
 
-// Ten minutes of access, thirty days of refresh. Short access tokens are what
+// An hour of access, thirty days of refresh. Short access tokens are what
 // make a stolen one survivable; the refresh token is the thing kept safe.
 const ACCESS_TTL_SECONDS = 60 * 60;
 const REFRESH_TTL_SECONDS = 60 * 60 * 24 * 30;
@@ -77,27 +79,15 @@ export function resourceMatches(value: unknown): boolean {
 
 // Tokens are random, not signed: this server is the only thing that validates
 // them, so a database lookup is simpler than key management and makes
-// revocation immediate rather than eventual.
+// revocation immediate rather than eventual. 256 bits, hex encoded — invitation
+// links use the same — and stored only as `hashToken` of it.
 export const newSecret = () => randomBytes(32).toString("hex");
-export const hashSecret = (value: string) =>
-  createHash("sha256").update(String(value)).digest("hex");
-
-/** Constant-time compare for anything secret-shaped. */
-export function secretsMatch(a: string, b: string): boolean {
-  const left = Buffer.from(String(a));
-  const right = Buffer.from(String(b));
-  if (left.length !== right.length) return false;
-  return timingSafeEqual(left, right);
-}
 
 /** PKCE, S256 only — OAuth 2.1 does not allow `plain`. */
 export function verifyPkce(verifier: string, challenge: string): boolean {
   if (!verifier || !challenge) return false;
   if (verifier.length < 43 || verifier.length > 128) return false;
-  const computed = createHash("sha256")
-    .update(verifier)
-    .digest("base64url");
-  return secretsMatch(computed, challenge);
+  return safeEqual(pkceChallenge(verifier), challenge);
 }
 
 export interface OAuthClient {
@@ -326,8 +316,8 @@ export async function issueTokens(
     "INSERT INTO `oauth_tokens` (`accessHash`, `refreshHash`, `clientId`, `userId`, `scope`, `resource`, `expiresAt`, `refreshExpiresAt`) " +
       "VALUES (?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL ? SECOND), DATE_ADD(NOW(), INTERVAL ? SECOND))",
     [
-      hashSecret(access),
-      hashSecret(refresh),
+      hashToken(access),
+      hashToken(refresh),
       clientId,
       userId,
       scope,
@@ -361,7 +351,7 @@ export async function validateAccessToken(token: string): Promise<
   const db = setupDatabase();
   const [rows]: any = await db.execute(
     "SELECT * FROM `oauth_tokens` WHERE `accessHash` = ? AND `revokedAt` IS NULL AND `expiresAt` > NOW() LIMIT 1",
-    [hashSecret(token)],
+    [hashToken(token)],
   );
   const row = rows[0];
   if (!row) return null;
@@ -382,5 +372,3 @@ export async function validateAccessToken(token: string): Promise<
 }
 
 export const CODE_LIFETIME_SECONDS = CODE_TTL_SECONDS;
-export const ACCESS_LIFETIME_SECONDS = ACCESS_TTL_SECONDS;
-export const REFRESH_LIFETIME_SECONDS = REFRESH_TTL_SECONDS;

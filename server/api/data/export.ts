@@ -1,6 +1,5 @@
 import { Readable } from "node:stream";
-import { defineEventHandler, setHeader } from "h3";
-import { setupDatabase } from "../../../app/lib/databaseSetup";
+import { setHeader } from "h3";
 import {
   addEntries,
   boardFolder,
@@ -25,28 +24,13 @@ import { sqlDump } from "../../utils/sqlDump";
 // acts as the account that issued the key, and that account has to be an
 // administrator.
 
-export default defineEventHandler(async (event) => {
-  if (event.req.method !== "GET") {
-    event.res.statusCode = 405;
-    return { error: "Method not allowed" };
-  }
-
-  const auth = await resolveUserId(event);
-  if (!auth.ok) {
-    event.res.statusCode = auth.status;
-    return { error: auth.error };
-  }
-  const db = setupDatabase();
-
-  try {
+export default dataHandler({
+  async GET({ event, db, userId }) {
     const [users]: any = await db.execute(
       "SELECT `role` FROM `user` WHERE `id` = ?",
-      [auth.userId],
+      [userId],
     );
-    if (users[0]?.role !== "admin") {
-      event.res.statusCode = 403;
-      return { error: "FORBIDDEN" };
-    }
+    if (users[0]?.role !== "admin") fail(403, "FORBIDDEN");
 
     const [boards]: any = await db.execute(
       "SELECT `id`, `name` FROM `boards` ORDER BY `id`",
@@ -99,9 +83,5 @@ export default defineEventHandler(async (event) => {
     );
     setHeader(event, "cache-control", "no-store");
     return archive;
-  } catch (error) {
-    logger.error("Database error:", error);
-    event.res.statusCode = 500;
-    return { error: "Internal server error" };
-  }
+  },
 });

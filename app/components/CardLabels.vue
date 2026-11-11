@@ -55,7 +55,7 @@
 </template>
 
 <script setup lang="ts">
-import { X } from "lucide-vue-next";
+import { X } from "@lucide/vue";
 import { LABEL_NAME_MAX, resolveLabel } from "@/utils/labels";
 
 const props = defineProps({

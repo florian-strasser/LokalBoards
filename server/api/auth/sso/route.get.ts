@@ -1,5 +1,5 @@
 import { getQuery } from "h3";
-import { providerForEmail } from "../../../utils/ssoProviders";
+import { providerForEmail, providerStartPath } from "../../../utils/ssoProviders";
 
 // Which provider signs in this address, if any — so somebody typing a work
 // address is offered their own organisation's button rather than having to know
@@ -18,10 +18,7 @@ export default defineEventHandler((event) => {
       id: provider.id,
       kind: provider.kind,
       label: provider.label,
-      start:
-        provider.kind === "oidc"
-          ? `/api/auth/sso/start?provider=${encodeURIComponent(provider.id)}`
-          : `/api/auth/saml/start?provider=${encodeURIComponent(provider.id)}`,
+      start: providerStartPath(provider),
     },
   };
 });

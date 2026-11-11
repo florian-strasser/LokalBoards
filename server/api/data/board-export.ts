@@ -1,5 +1,4 @@
-import { defineEventHandler, getQuery, setHeader } from "h3";
-import { setupDatabase } from "../../../app/lib/databaseSetup";
+import { setHeader } from "h3";
 import {
   addEntries,
   boardFolder,
@@ -17,47 +16,20 @@ import { boardCsv } from "../../utils/cardsCsv";
 // attachment in here is something they could already open one at a time; this
 // saves them the clicking.
 
-export default defineEventHandler(async (event) => {
-  if (event.req.method !== "GET") {
-    event.res.statusCode = 405;
-    return { error: "Method not allowed" };
-  }
-
-  const auth = await resolveUserId(event);
-  if (!auth.ok) {
-    event.res.statusCode = auth.status;
-    return { error: auth.error };
-  }
-  const db = setupDatabase();
-
-  try {
-    const boardId = Number(getQuery(event).boardId);
-    if (!Number.isInteger(boardId) || boardId <= 0) {
-      event.res.statusCode = 400;
-      return { error: "Required fields are missing" };
-    }
-
-    const [rows]: any = await db.execute("SELECT * FROM boards WHERE id = ?", [
-      boardId,
-    ]);
-    const board = rows[0];
-    if (!board) {
-      event.res.statusCode = 404;
-      return { error: "Resource not found" };
-    }
-    const decision = await authorizeBoard(db, board, auth.userId, "read");
-    if (!decision.ok) {
-      event.res.statusCode = decision.status;
-      return { error: decision.error };
-    }
+export default dataHandler({
+  async GET({ event, db, query, boardOf }) {
+    const { board } = await boardOf(
+      positiveId(query.boardId, "Required fields are missing"),
+      "read",
+    );
 
     const now = new Date();
     const folder = boardFolder(board);
+    const config = useRuntimeConfig();
 
     // The same board as a spreadsheet: its cards, one per row, for somebody
     // who reports on the work rather than moves it somewhere else.
-    if (getQuery(event).format === "csv") {
-      const config = useRuntimeConfig();
+    if (query.format === "csv") {
       const csv = await boardCsv(db, board.id, {
         language: config.language,
         baseUrl: config.boardsUrl,
@@ -76,13 +48,10 @@ export default defineEventHandler(async (event) => {
     // rather than a download that stops halfway.
     const built = await buildBoardExport(db, board.id, {
       filesAt: "attachments/",
-      version: useRuntimeConfig().appVersion ?? null,
+      version: config.appVersion ?? null,
       now,
     });
-    if (!built) {
-      event.res.statusCode = 404;
-      return { error: "Resource not found" };
-    }
+    if (!built) fail(404, "Resource not found");
 
     const archive = createZip();
     archive.on("warning", (error: any) =>
@@ -106,9 +75,5 @@ export default defineEventHandler(async (event) => {
     );
     setHeader(event, "cache-control", "no-store");
     return archive;
-  } catch (error) {
-    logger.error("Database error:", error);
-    event.res.statusCode = 500;
-    return { error: "Internal server error" };
-  }
+  },
 });

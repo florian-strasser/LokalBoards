@@ -1,4 +1,4 @@
-import { listProviders } from "../../../utils/ssoProviders";
+import { listProviders, providerStartPath } from "../../../utils/ssoProviders";
 
 // What the sign-in page needs: which providers this instance offers, what to
 // call each, and where its button goes. Deliberately an endpoint rather than
@@ -14,22 +14,12 @@ export default defineEventHandler((event) => {
     id: provider.id,
     kind: provider.kind,
     label: provider.label,
-    start:
-      provider.kind === "oidc"
-        ? `/api/auth/sso/start?provider=${encodeURIComponent(provider.id)}`
-        : `/api/auth/saml/start?provider=${encodeURIComponent(provider.id)}`,
+    start: providerStartPath(provider),
   }));
 
   return {
     providers,
     // Whether typing an address can route somebody to their own provider.
     routing: listProviders(event).some((provider) => provider.domains.length),
-    // Kept for anything still reading the older shape.
-    enabled: providers.some((provider) => provider.kind === "oidc"),
-    label: providers.find((provider) => provider.kind === "oidc")?.label ?? "",
-    saml: {
-      enabled: providers.some((provider) => provider.kind === "saml"),
-      label: providers.find((provider) => provider.kind === "saml")?.label ?? "",
-    },
   };
 });

@@ -619,7 +619,7 @@ import {
     UserPlus,
     Upload,
     Repeat,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 
 // Dates render in the instance's timezone and language, identically on the
 // server and in the browser — see the composable.

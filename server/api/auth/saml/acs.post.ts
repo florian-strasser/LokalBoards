@@ -5,11 +5,8 @@ import {
   acceptAssertion,
   buildSaml,
   profileFromAssertion,
-  readSamlConfig,
-  samlIsUsable,
 } from "../../../utils/saml";
-import { findProvider, listProviders } from "../../../utils/ssoProviders";
-import type { SamlConfig } from "../../../utils/saml";
+import { requestedProvider } from "../../../utils/ssoProviders";
 
 // Step two: the assertion consumer service. The provider POSTs a signed
 // response here through the browser.
@@ -28,25 +25,23 @@ export default defineEventHandler(async (event) => {
   // Which provider this response belongs to. With one configured it is that
   // one; with several, the ACS carries the provider's name — `?provider=partner`
   // — because each is registered with its own URL at its own end.
-  const requested = String(getQuery(event).provider || "");
-  const provider = requested ? findProvider(requested, event) : null;
-  let config: SamlConfig = (provider?.config as SamlConfig) ?? readSamlConfig(event);
-
-  if (requested && (!provider || provider.kind !== "saml")) {
+  const provider = requestedProvider(
+    "saml",
+    String(getQuery(event).provider || ""),
+    event,
+  );
+  if (!provider) {
     event.res.statusCode = 404;
     return { error: "saml_not_configured" };
   }
-  if (!samlIsUsable(config)) {
-    event.res.statusCode = 404;
-    return { error: "saml_not_configured" };
-  }
+  const { config } = provider;
 
   try {
     const body = await readBody(event);
     const samlResponse = String(body?.SAMLResponse || "");
     if (!samlResponse) return fail(event, "no_assertion");
 
-    const saml = buildSaml(config, event, provider?.id);
+    const saml = buildSaml(config, event, provider.id);
     const { profile: assertion } = await saml.validatePostResponseAsync({
       SAMLResponse: samlResponse,
       RelayState: String(body?.RelayState || ""),

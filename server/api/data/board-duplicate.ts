@@ -1,6 +1,5 @@
-import { defineEventHandler, readBody } from "h3";
-import { setupDatabase } from "../../../app/lib/databaseSetup";
-import { normalizeBoardColor } from "../../../app/utils/boardColor";
+import { readBody } from "h3";
+import { createBoard } from "../../utils/boards";
 
 // A board's structure, again, under a new name.
 //
@@ -13,90 +12,52 @@ import { normalizeBoardColor } from "../../../app/utils/boardColor";
 
 const NAME_MAX = 255;
 
-export default defineEventHandler(async (event) => {
-  if (event.req.method !== "POST") {
-    event.res.statusCode = 405;
-    return { error: "Method not allowed" };
-  }
-
-  const auth = await resolveUserId(event);
-  if (!auth.ok) {
-    event.res.statusCode = auth.status;
-    return { error: auth.error };
-  }
-  const userId = auth.userId;
-  const db = setupDatabase();
-
-  try {
+export default dataHandler({
+  async POST({ event, db, userId, boardOf }) {
     const body = await readBody(event).catch(() => null);
-    const boardId = Number((body as any)?.boardId);
-    const name = String((body as any)?.name ?? "").trim();
-
+    const boardId = Number(body?.boardId);
+    const name = String(body?.name ?? "").trim();
     if (!Number.isInteger(boardId) || boardId <= 0 || !name || name.length > NAME_MAX) {
-      event.res.statusCode = 400;
-      return { error: "Required fields are missing" };
+      fail(400, "Required fields are missing");
     }
-
-    const [rows]: any = await db.execute("SELECT * FROM boards WHERE id = ?", [
-      boardId,
-    ]);
-    const source = rows[0];
-    if (!source) {
-      event.res.statusCode = 404;
-      return { error: "Resource not found" };
-    }
-
-    const decision = await authorizeBoard(db, source, userId, "read");
-    if (!decision.ok) {
-      event.res.statusCode = decision.status;
-      return { error: decision.error };
-    }
+    const { board: source } = await boardOf(boardId, "read");
 
     // The copy belongs to whoever asked for it, not to whoever owns the
     // original, and it is private until they say otherwise: a new board with
     // nothing in it is nobody else's business yet.
-    const [created]: any = await db.execute(
-      "INSERT INTO boards (user, name, style, image, color, status) VALUES (?, ?, ?, ?, ?, ?)",
-      [
-        userId,
-        name,
-        source.style ?? "kanban",
-        source.image ?? null,
-        normalizeBoardColor(source.color),
-        "private",
-      ],
-    );
-    const newBoardId = created.insertId;
+    const board = await createBoard(db, userId, {
+      name,
+      style: source.style ?? "kanban",
+      status: "private",
+      image: source.image ?? null,
+      color: source.color,
+    });
 
     // The columns as they stand. An archived one is not part of the board's
     // shape any more, so it is not part of the copy.
     const [areas]: any = await db.execute(
       "SELECT `name`, `sort` FROM `areas` WHERE `board` = ? AND `archivedAt` IS NULL ORDER BY `sort` ASC, `id` ASC",
-      [boardId],
+      [source.id],
     );
-    for (const area of areas as any[]) {
+    for (const area of areas) {
       await db.execute(
         "INSERT INTO `areas` (`board`, `name`, `sort`) VALUES (?, ?, ?)",
-        [newBoardId, area.name, area.sort],
+        [board.id, area.name, area.sort],
       );
     }
 
-    await notifyDashboards(db, newBoardId, [userId]);
+    await notifyDashboards(db, board.id, [userId]);
 
     return {
       board: {
-        id: newBoardId,
-        name,
-        style: source.style ?? "kanban",
-        image: source.image ?? null,
-        color: normalizeBoardColor(source.color),
-        status: "private",
+        id: board.id,
+        name: board.name,
+        style: board.style,
+        image: board.image,
+        color: board.color,
+        status: board.status,
       },
       areas: areas.length,
     };
-  } catch (error) {
-    logger.error("Database error:", error);
-    event.res.statusCode = 500;
-    return { error: "Internal server error" };
-  }
+  },
 });

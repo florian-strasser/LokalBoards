@@ -174,7 +174,7 @@ try {
     check("a plain click elsewhere still puts them away", !(await results.isVisible()));
 
     // --- The notifications ------------------------------------------------
-    await page.locator('button[aria-label="Notifications"]').first().click();
+    await page.locator('[aria-label="Notifications"]').first().click();
     const panel = page.locator("body > div.fixed.z-50", { has: page.locator("h3") });
     await panel.waitFor({ timeout: 5000 }).catch(() => {});
     check("the bell opens its panel", await panel.isVisible());

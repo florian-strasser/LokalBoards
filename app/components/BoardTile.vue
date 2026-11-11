@@ -183,7 +183,7 @@ import {
     CopyPlus,
     Pencil,
     UserRoundPlus,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import { boardTextColor, normalizeBoardColor } from "@/utils/boardColor";
 const props = defineProps({
     id: Number,

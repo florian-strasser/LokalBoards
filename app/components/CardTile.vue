@@ -125,7 +125,7 @@ import {
     Paperclip,
     Clock,
     Repeat,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 
 import { peopleOn } from "@/utils/boardFilter";
 

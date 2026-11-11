@@ -182,7 +182,7 @@
 // Nothing here changes what a card or an area is, so switching the board back
 // to columns loses nothing: `sort` still says what the order is, and dragging a
 // card onto another area is the same move as dragging it into another column.
-import { Archive, Maximize, Plus, ZoomIn, ZoomOut } from "lucide-vue-next";
+import { Archive, Maximize, Plus, ZoomIn, ZoomOut } from "@lucide/vue";
 import { clampToMap, mapBounds, placeMap } from "~/utils/mindMap";
 import { socket } from "~/lib/socket";
 

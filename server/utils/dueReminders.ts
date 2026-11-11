@@ -1,4 +1,5 @@
 import { getBoardMemberIds } from "./boardMembers";
+import { notificationText, notifyUser } from "./notify";
 
 // Create in-app `card_due` notifications for every reminder whose fire time
 // (dueDate - minutesBefore) has arrived and that hasn't fired yet. The existing
@@ -41,17 +42,15 @@ export async function runDueReminders(db: any): Promise<number> {
       ? onIt.map((row: any) => String(row.user))
       : await getBoardMemberIds(db, r.boardId);
 
-    // Store the due date as ISO so the notification translators (UI + email)
-    // can localise it.
-    const message = `Card "${r.cardName}" is due on ${new Date(
-      r.dueDate,
-    ).toISOString()}`;
-
+    // A reminder from the app itself, so nobody is behind it.
     for (const memberId of recipients) {
-      await db.execute(
-        "INSERT INTO notifications (userId, type, boardId, cardId, message) VALUES (?, ?, ?, ?, ?)",
-        [memberId, "card_due", r.boardId, r.cardId, message],
-      );
+      await notifyUser(db, memberId, {
+        type: "card_due",
+        boardId: r.boardId,
+        cardId: r.cardId,
+        message: notificationText.cardDue(r.cardName, new Date(r.dueDate)),
+        actorId: null,
+      });
     }
 
     await db.execute("UPDATE card_reminders SET notified = 1 WHERE id = ?", [

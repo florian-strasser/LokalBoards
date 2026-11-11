@@ -146,9 +146,16 @@ describe("auth endpoints (e2e)", async () => {
   it("stores a reset link only as its hash, and answers before the mail goes out", async () => {
     const db = setupDatabase();
     const email = `reset-request-${Date.now()}@example.com`;
+    const userId = uuidv4();
     await db.execute(
       "INSERT INTO `user` (id, name, email, emailVerified, role) VALUES (?,?,?,?,?)",
-      [uuidv4(), "Reset Request", email, 1, "user"],
+      [userId, "Reset Request", email, 1, "user"],
+    );
+    // A password of its own to reset: an account that signs in through SSO
+    // only is sent no link.
+    await db.execute(
+      "INSERT INTO `account` (id, accountId, providerId, userId, password) VALUES (?,?,?,?,?)",
+      [uuidv4(), userId, "local", userId, "not-a-real-hash"],
     );
     // The mail server here refuses connections. Before v0.41.0 the send was
     // awaited for existing accounts only, so this answered 500 for an address

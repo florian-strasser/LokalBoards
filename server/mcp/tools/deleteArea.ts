@@ -1,6 +1,6 @@
 import { defineMcpTool } from "@nuxtjs/mcp-toolkit/server";
 import { setupDatabase } from "../../../app/lib/databaseSetup";
-import { getServerSocket } from "../../utils/socket";
+import { archiveArea } from "../../utils/areas";
 import {
   requireUserId,
   requireWriteAccess,
@@ -13,12 +13,12 @@ const db = setupDatabase();
 
 export default defineMcpTool({
   name: "deleteArea",
-  title: "Delete an area",
+  title: "Archive an area",
   description:
-    "Permanently delete an area (column) and every card in it, along with those cards' comments, attachments and notifications. This cannot be undone. Needs edit access to the board.",
+    "Archive an area (column) with every card in it, as deleting one in the app does. It leaves the board and can be restored from the board's archive, where it is deleted for good after the retention period. Needs edit access to the board.",
   annotations: {
     readOnlyHint: false,
-    destructiveHint: true,
+    destructiveHint: false,
     idempotentHint: true,
     openWorldHint: false,
   },
@@ -28,31 +28,9 @@ export default defineMcpTool({
     const userId = requireUserId();
     requireWriteAccess();
     const aid = requireId(areaId, areaID, "areaId");
-    const { board } = await requireArea(aid, userId, "edit");
-
-    await db.execute(
-      "DELETE FROM comments WHERE card IN (SELECT id FROM cards WHERE area = ?)",
-      [aid],
-    );
-    await db.execute(
-      "DELETE FROM attachments WHERE card IN (SELECT id FROM cards WHERE area = ?)",
-      [aid],
-    );
-    await db.execute(
-      "DELETE FROM notifications WHERE cardId IN (SELECT id FROM cards WHERE area = ?)",
-      [aid],
-    );
-    await db.execute("DELETE FROM cards WHERE area = ?", [aid]);
-    await db.execute("DELETE FROM areas WHERE id = ?", [aid]);
-
-    const serverSocket = getServerSocket();
-    if (serverSocket) {
-      serverSocket.to(`board-${board.id}`).emit("deleteArea", {
-        area: aid,
-        boardId: board.id,
-      });
-    }
-
-    return jsonResult({ deleted: true, areaId: aid });
+    const { area } = await requireArea(aid, userId, "edit");
+    // Into the archive, as in the app: an agent's mistake can be undone there.
+    await archiveArea(db, area, true);
+    return jsonResult({ archived: true, areaId: aid });
   },
 });

@@ -1,532 +1,70 @@
-import { defineEventHandler, readBody, getQuery } from "h3";
-import { setupDatabase } from "../../../app/lib/databaseSetup";
-import { dispatchWebhooks } from "../../utils/webhooks";
-import { getServerSocket } from "../../utils/socket";
-
-export default defineEventHandler(async (event) => {
-  // Check the HTTP method
-  const method = event.req.method;
-
-  // Resolve the authenticated user (API key or session).
-  const auth = await resolveUserId(event);
-  if (!auth.ok) {
-    event.res.statusCode = auth.status;
-    return { error: auth.error };
-  }
-  const userId = auth.userId;
-
-  try {
-    // Initialize database
-    const db = setupDatabase();
-
-    if (method === "GET") {
-      // Handle GET request to fetch comments for a card
-      const { cardID } = getQuery(event);
-
-      // HIGH FIX: Validate cardID is a positive integer
-      if (!cardID || isNaN(Number(cardID)) || Number(cardID) <= 0) {
-        event.res.statusCode = 400;
-        return { error: "Invalid card ID" };
-      }
-
-      const [rows] = await db.execute("SELECT * FROM cards WHERE id = ?", [
-        cardID,
-      ]);
-      const card = rows[0];
-
-      if (!card) {
-        // HIGH FIX: Generic error to prevent card enumeration
-        event.res.statusCode = 404;
-        return { error: "Resource not found" };
-      }
-
-      const [boardRows] = await db.execute(
-        "SELECT b.* FROM boards b JOIN areas a ON b.id = a.board WHERE a.id = ?",
-        [card.area],
-      );
-      const board = boardRows[0];
-
-      if (!board) {
-        // HIGH FIX: Generic error to prevent board enumeration
-        event.res.statusCode = 404;
-        return { error: "Resource not found" };
-      }
-
-      const decision = await authorizeBoard(db, board, userId, "read");
-      if (!decision.ok) {
-        event.res.statusCode = decision.status;
-        return { error: decision.error };
-      }
-      {
-        // Fetch comments for the card with user information using a LEFT JOIN
-        const [rows] = await db.execute(
-          "SELECT comments.id AS id, comments.card AS card, comments.user AS user, COALESCE(user.name, comments.authorName) AS userName, user.image AS image, comments.content AS content, comments.date AS date FROM comments LEFT JOIN user ON comments.user = user.id WHERE comments.card = ? ORDER BY comments.date DESC",
-          [cardID],
-        );
-        const comments = rows.map((row) => ({
-          id: row.id,
-          card: row.card,
-          user: row.user,
-          userImage: row.image,
-          userName: row.userName || "Unknown User",
-          content: row.content,
-          date: row.date,
-        }));
-
-        return { comments: comments };
-      }
-    } else if (method === "POST") {
-      // Handle POST request to create a new comment
-      const { card, content } = await readBody(event);
-
-      // HIGH FIX: Validate required fields with generic message
-      if (!card || !content) {
-        event.res.statusCode = 400;
-        return { error: "Required fields are missing" };
-      }
-
-      // HIGH FIX: Validate card is a positive integer
-      if (isNaN(Number(card)) || Number(card) <= 0) {
-        event.res.statusCode = 400;
-        return { error: "Invalid card ID" };
-      }
-
-      const [rows] = await db.execute("SELECT * FROM cards WHERE id = ?", [
-        card,
-      ]);
-      const cardItem = rows[0];
-
-      if (!cardItem) {
-        // HIGH FIX: Generic error to prevent card enumeration
-        event.res.statusCode = 404;
-        return { error: "Resource not found" };
-      }
-
-      const [boardRows] = await db.execute(
-        "SELECT b.* FROM boards b JOIN areas a ON b.id = a.board WHERE a.id = ?",
-        [cardItem.area],
-      );
-      const board = boardRows[0];
-
-      if (!board) {
-        // HIGH FIX: Generic error to prevent board enumeration
-        event.res.statusCode = 404;
-        return { error: "Resource not found" };
-      }
-
-      const writeDecision = await authorizeBoard(db, board, userId, "edit");
-      if (!writeDecision.ok) {
-        event.res.statusCode = writeDecision.status;
-        return { error: writeDecision.error };
-      }
-      {
-        // CRITICAL FIX: Use authenticated userId instead of body user
-        // Create new comment
-        const [result] = await db.execute(
-          "INSERT INTO comments (card, user, content) VALUES (?, ?, ?)",
-          [card, userId, content],
-        );
-
-        // Fetch the created comment with user information using a LEFT JOIN
-        const [rows] = await db.execute(
-          "SELECT comments.*, user.name AS userName, user.image AS userImage FROM comments LEFT JOIN user ON comments.user = user.id WHERE comments.id = ?",
-          [result.insertId],
-        );
-        const comment = rows[0]
-          ? {
-              id: rows[0].id,
-              card: rows[0].card,
-              user: rows[0].user,
-              userImage: rows[0].userImage,
-              userName: rows[0].userName || "Unknown User",
-              content: rows[0].content,
-              date: rows[0].date,
-            }
-          : null;
-
-        // Emit socket event for new comment (API calls only)
-        if (auth.viaApiKey) {
-          const serverSocket = getServerSocket();
-          if (serverSocket) {
-            serverSocket.to(`card-${card}`).emit("addComment", {
-              comment,
-              cardID: card,
-            });
-          }
-        }
-
-        // Fetch all users who have access to the board (owner and invited users)
-        const [boardRows] = await db.execute(
-          "SELECT user, id AS boardId FROM boards WHERE id = (SELECT board FROM areas WHERE id = (SELECT area FROM cards WHERE id = ?))",
-          [card],
-        );
-        const boardOwner = boardRows[0]?.user;
-        const boardId = boardRows[0]?.boardId;
-
-        const [invitedUsers] = await db.execute(
-          "SELECT user FROM invitations WHERE board = (SELECT board FROM areas WHERE id = (SELECT area FROM cards WHERE id = ?))",
-          [card],
-        );
-
-        // Create notifications for the board owner and invited users
-        const usersToNotify = [
-          boardOwner,
-          ...invitedUsers.map((inv) => inv.user),
-        ].filter(Boolean);
-
-        // Fetch the created comment with user information using a LEFT JOIN
-        const [cRows] = await db.execute("SELECT * FROM cards WHERE id = ?", [
-          card,
-        ]);
-
-        for (const notifyUserId of usersToNotify) {
-          if (notifyUserId !== userId) {
-            // Don't notify the authenticated user who created the comment
-            await db.execute(
-              "INSERT INTO notifications (userId, type, boardId, cardId, message, actorId) VALUES (?, ?, ?, ?, ?, ?)",
-              [
-                notifyUserId,
-                "comment",
-                boardId,
-                card,
-                `New comment by "${rows[0].userName}" on card "${cRows[0]?.name || "a card"}": ${rows[0].content}`,
-                              userId,
-              ],
-            );
-          }
-        }
-
-        dispatchWebhooks({
-          boardId: board?.id,
-          event: "comment.created",
-          actorUserId: userId,
-          card: { id: cardItem?.id, name: cardItem?.name },
-          comment: { id: comment?.id, content: comment?.content ?? "" },
-        });
-
-        return { comment };
-      }
-    } else if (method === "PATCH") {
-      // Handle PATCH request to update checklist state in a comment
-      // This allows any user with write access to the board to toggle checkboxes
-      const { id, content, cardId } = await readBody(event);
-
-      // Validate required fields
-      if (!id || !content || !cardId) {
-        event.res.statusCode = 400;
-        return { error: "Required fields are missing" };
-      }
-
-      // Validate id and cardId are positive integers
-      if (
-        isNaN(Number(id)) ||
-        Number(id) <= 0 ||
-        isNaN(Number(cardId)) ||
-        Number(cardId) <= 0
-      ) {
-        event.res.statusCode = 400;
-        return { error: "Invalid ID" };
-      }
-
-      // Fetch the comment
-      const [commentRows] = await db.execute(
-        "SELECT c.*, card FROM comments c WHERE c.id = ?",
-        [id],
-      );
-      const comment = commentRows[0];
-
-      if (!comment) {
-        event.res.statusCode = 404;
-        return { error: "Resource not found" };
-      }
-
-      // Verify comment belongs to the specified card
-      if (comment.card !== Number(cardId)) {
-        event.res.statusCode = 400;
-        return { error: "Comment does not belong to specified card" };
-      }
-
-      // Verify card exists
-      const [cardRows] = await db.execute("SELECT * FROM cards WHERE id = ?", [
-        comment.card,
-      ]);
-      const card = cardRows[0];
-
-      if (!card) {
-        event.res.statusCode = 404;
-        return { error: "Resource not found" };
-      }
-
-      // Verify board exists and check write access
-      const [boardRows] = await db.execute(
-        "SELECT b.* FROM boards b JOIN areas a ON b.id = a.board WHERE a.id = ?",
-        [card.area],
-      );
-      const board = boardRows[0];
-
-      if (!board) {
-        event.res.statusCode = 404;
-        return { error: "Resource not found" };
-      }
-
-      // Check write access (same logic as POST method)
-      const writeDecision = await authorizeBoard(db, board, userId, "edit");
-      if (!writeDecision.ok) {
-        event.res.statusCode = writeDecision.status;
-        return { error: writeDecision.error };
-      }
-
-      // Validate that only data-checked attributes have changed
-      // The frontend sends only the taskList element, so we need to extract it from the old content
-      const oldTaskListMatch = comment.content.match(
-        /<ul data-type="taskList"[^>]*>(?:[^<]|<(?!\/ul>))+<\/ul>/,
-      );
-      const oldTaskList = oldTaskListMatch ? oldTaskListMatch[0] : null;
-
-      if (!oldTaskList) {
-        event.res.statusCode = 400;
-        return { error: "No task list found in original comment" };
-      }
-
-      // Extract checkbox states from both old and new taskList
-      const oldCheckboxMatches =
-        oldTaskList.match(/data-checked="([^"]*)"/g) || [];
-      const newCheckboxMatches = content.match(/data-checked="([^"]*)"/g) || [];
-
-      // Check if the list structure is the same (same number of checkboxes)
-      if (oldCheckboxMatches.length !== newCheckboxMatches.length) {
-        event.res.statusCode = 400;
-        return { error: "Invalid content structure" };
-      }
-
-      // Simpler: compare content ignoring only the checked state attributes
-      const oldWithoutCheckState = oldTaskList
-        .replace(/data-checked="(true|false)"/g, "")
-        .replace(/\s*checked="checked"/g, "");
-      const newWithoutCheckState = content
-        .replace(/data-checked="(true|false)"/g, "")
-        .replace(/\s*checked="checked"/g, "");
-
-      // If everything else is identical, only checkbox state changed
-      if (oldWithoutCheckState !== newWithoutCheckState) {
-        event.res.statusCode = 400;
-        return { error: "Only checkbox states can be modified" };
-      }
-
-      // Update the comment content
-      await db.execute("UPDATE comments SET content = ? WHERE id = ?", [
-        content,
-        id,
-      ]);
-
-      // Fetch the updated comment with user information
-      const [rows] = await db.execute(
-        "SELECT comments.*, user.name AS userName, user.image AS userImage FROM comments LEFT JOIN user ON comments.user = user.id WHERE comments.id = ?",
-        [id],
-      );
-      const updatedComment = rows[0]
-        ? {
-            id: rows[0].id,
-            card: rows[0].card,
-            user: rows[0].user,
-            userImage: rows[0].userImage,
-            userName: rows[0].userName || "Unknown User",
-            content: rows[0].content,
-            date: rows[0].date,
-          }
-        : null;
-
-      // Emit socket event for comment update (API calls only)
-      if (auth.viaApiKey) {
-        const serverSocket = getServerSocket();
-        if (serverSocket) {
-          serverSocket.to(`card-${comment.card}`).emit("updateComment", {
-            comment: updatedComment,
-            cardID: comment.card,
-          });
-        }
-      }
-
-      return { comment: updatedComment };
-    } else if (method === "PUT") {
-      // Handle PUT request to update a comment by its creator
-      const { id, content } = await readBody(event);
-
-      // Validate required fields
-      if (!id || !content) {
-        event.res.statusCode = 400;
-        return { error: "Required fields are missing" };
-      }
-
-      // Validate id is a positive integer
-      if (isNaN(Number(id)) || Number(id) <= 0) {
-        event.res.statusCode = 400;
-        return { error: "Invalid comment ID" };
-      }
-
-      // Fetch the comment with card reference
-      const [commentRows] = await db.execute(
-        "SELECT c.*, card FROM comments c WHERE c.id = ?",
-        [id],
-      );
-      const comment = commentRows[0];
-
-      if (!comment) {
-        event.res.statusCode = 404;
-        return { error: "Resource not found" };
-      }
-
-      // Verify card exists
-      const [cardRows] = await db.execute("SELECT * FROM cards WHERE id = ?", [
-        comment.card,
-      ]);
-      const card = cardRows[0];
-
-      if (!card) {
-        event.res.statusCode = 404;
-        return { error: "Resource not found" };
-      }
-
-      // Verify board exists and check access
-      const [boardRows] = await db.execute(
-        "SELECT b.* FROM boards b JOIN areas a ON b.id = a.board WHERE a.id = ?",
-        [card.area],
-      );
-      const board = boardRows[0];
-
-      if (!board) {
-        event.res.statusCode = 404;
-        return { error: "Resource not found" };
-      }
-
-      // Check board access (defense in depth — creator should have access)
-      const accessDecision = await authorizeBoard(db, board, userId, "read");
-      if (!accessDecision.ok) {
-        event.res.statusCode = accessDecision.status;
-        return { error: accessDecision.error };
-      }
-
-      // Only allow update by the comment creator
-      if (comment.user !== userId) {
-        event.res.statusCode = 403;
-        return { error: "Unauthorized access" };
-      }
-
-      // Update the comment content
-      await db.execute("UPDATE comments SET content = ? WHERE id = ?", [
-        content,
-        id,
-      ]);
-
-      // Fetch the updated comment with user information
-      const [rows] = await db.execute(
-        "SELECT comments.*, user.name AS userName, user.image AS userImage FROM comments LEFT JOIN user ON comments.user = user.id WHERE comments.id = ?",
-        [id],
-      );
-      const updatedComment = rows[0]
-        ? {
-            id: rows[0].id,
-            card: rows[0].card,
-            user: rows[0].user,
-            userImage: rows[0].userImage,
-            userName: rows[0].userName || "Unknown User",
-            content: rows[0].content,
-            date: rows[0].date,
-          }
-        : null;
-
-      // Emit socket event for comment update (API calls only)
-      if (auth.viaApiKey) {
-        const serverSocket = getServerSocket();
-        if (serverSocket) {
-          serverSocket.to(`card-${comment.card}`).emit("updateComment", {
-            comment: updatedComment,
-            cardID: comment.card,
-          });
-        }
-      }
-
-      return { comment: updatedComment };
-    } else if (method === "DELETE") {
-      // Handle DELETE request to remove a comment by its creator
-      const { commentId } = getQuery(event);
-
-      // Validate commentId is a positive integer
-      if (!commentId || isNaN(Number(commentId)) || Number(commentId) <= 0) {
-        event.res.statusCode = 400;
-        return { error: "Invalid comment ID" };
-      }
-
-      // Fetch the comment with card reference
-      const [commentRows] = await db.execute(
-        "SELECT c.*, card FROM comments c WHERE c.id = ?",
-        [commentId],
-      );
-      const comment = commentRows[0];
-
-      if (!comment) {
-        event.res.statusCode = 404;
-        return { error: "Resource not found" };
-      }
-
-      // Verify card exists to prevent orphaned references
-      const [cardRows] = await db.execute("SELECT * FROM cards WHERE id = ?", [
-        comment.card,
-      ]);
-      const card = cardRows[0];
-
-      if (!card) {
-        event.res.statusCode = 404;
-        return { error: "Resource not found" };
-      }
-
-      // Verify board exists and check access (defense in depth)
-      const [boardRows] = await db.execute(
-        "SELECT b.* FROM boards b JOIN areas a ON b.id = a.board WHERE a.id = ?",
-        [card.area],
-      );
-      const board = boardRows[0];
-
-      if (!board) {
-        event.res.statusCode = 404;
-        return { error: "Resource not found" };
-      }
-
-      // Check board read access (defense in depth - creator should have access)
-      const accessDecision = await authorizeBoard(db, board, userId, "read");
-      if (!accessDecision.ok) {
-        event.res.statusCode = accessDecision.status;
-        return { error: accessDecision.error };
-      }
-
-      // Only allow deletion by the comment creator
-      if (comment.user !== userId) {
-        event.res.statusCode = 403;
-        return { error: "Unauthorized access" };
-      }
-
-      // Delete the comment
-      await db.execute("DELETE FROM comments WHERE id = ?", [commentId]);
-
-      // Emit socket event for comment deletion (API calls only)
-      if (auth.viaApiKey) {
-        const serverSocket = getServerSocket();
-        if (serverSocket) {
-          serverSocket.to(`card-${comment.card}`).emit("deleteComment", {
-            commentId: Number(commentId),
-            cardID: comment.card,
-          });
-        }
-      }
-
-      return { success: true };
-    } else {
-      event.res.statusCode = 405;
-      return { error: "Method not allowed" };
+import { readBody } from "h3";
+import { onlyTicksChanged } from "../../utils/commentChecklist";
+import {
+  addComment,
+  changeComment,
+  commentById,
+  commentsOn,
+  removeComment,
+} from "../../utils/comments";
+
+// The comment asked for, with access to its card's board decided at `level`.
+async function commentOf(
+  db: any,
+  id: unknown,
+  cardOf: (id: unknown, level: "read" | "edit") => Promise<any>,
+  level: "read" | "edit",
+) {
+  const comment = await commentById(db, positiveId(id, "Invalid comment ID"));
+  if (!comment) fail(404, "Resource not found");
+  await cardOf(comment.card, level);
+  return comment;
+}
+
+export default dataHandler({
+  // A card's comments, newest first.
+  async GET({ db, query, cardOf }) {
+    const { card } = await cardOf(query.cardID, "read");
+    return { comments: await commentsOn(db, card.id) };
+  },
+
+  async POST({ event, db, userId, viaApiKey, cardOf }) {
+    const { card, content } = await readBody(event);
+    if (!card || !content) fail(400, "Required fields are missing");
+    const found = await cardOf(card, "edit");
+    return { comment: await addComment(db, found, userId, content, viaApiKey) };
+  },
+
+  // A box in a comment's checklist ticked or unticked. Anybody who may edit
+  // the board can do that to anybody's comment, so it may change the ticks
+  // and nothing else (see onlyTicksChanged).
+  async PATCH({ event, db, viaApiKey, cardOf }) {
+    const { id, content, cardId } = await readBody(event);
+    if (!id || !content || !cardId) fail(400, "Required fields are missing");
+    const comment = await commentOf(db, id, cardOf, "edit");
+    if (comment.card !== positiveId(cardId, "Invalid ID")) {
+      fail(400, "Comment does not belong to specified card");
     }
-  } catch (error) {
-    logger.error("Database error:", error);
-    event.res.statusCode = 500;
-    return { error: "Internal server error" };
-  }
+    if (!onlyTicksChanged(comment.content, content)) {
+      fail(400, "Only checkbox states can be modified");
+    }
+    return { comment: await changeComment(db, comment, content, viaApiKey) };
+  },
+
+  // A comment changed by whoever wrote it.
+  async PUT({ event, db, userId, viaApiKey, cardOf }) {
+    const { id, content } = await readBody(event);
+    if (!id || !content) fail(400, "Required fields are missing");
+    const comment = await commentOf(db, id, cardOf, "read");
+    if (comment.user !== userId) fail(403, "Unauthorized access");
+    return { comment: await changeComment(db, comment, content, viaApiKey) };
+  },
+
+  // A comment taken back by whoever wrote it.
+  async DELETE({ db, query, userId, viaApiKey, cardOf }) {
+    const comment = await commentOf(db, query.commentId, cardOf, "read");
+    if (comment.user !== userId) fail(403, "Unauthorized access");
+    await removeComment(db, comment, viaApiKey);
+    return { success: true };
+  },
 });

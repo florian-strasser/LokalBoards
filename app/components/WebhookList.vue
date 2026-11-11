@@ -93,7 +93,7 @@
     </div>
 </template>
 <script setup lang="ts">
-import { Trash2, Webhook } from "lucide-vue-next";
+import { Trash2, Webhook } from "@lucide/vue";
 
 const nuxtApp = useNuxtApp();
 

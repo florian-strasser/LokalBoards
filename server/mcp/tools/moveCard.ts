@@ -1,8 +1,7 @@
 import { z } from "zod";
 import { defineMcpTool } from "@nuxtjs/mcp-toolkit/server";
 import { setupDatabase } from "../../../app/lib/databaseSetup";
-import { getServerSocket } from "../../utils/socket";
-import { putCard, renumberColumn } from "../../utils/cardPositions";
+import { moveCard } from "../../utils/cards";
 import {
   requireUserId,
   requireWriteAccess,
@@ -17,7 +16,7 @@ export default defineMcpTool({
   name: "moveCard",
   title: "Move a card",
   description:
-    "Move a card to a position in an area (its current area or a different one). `position` is 0-based (0 = top). Moving across areas needs edit access to both. To only reorder within the same area you can also use orderCard.",
+    "Move a card to a position in an area: its current one, another on the same board, or one on another board. `position` is 0-based (0 = top). Moving needs edit access to the card's board and to the destination's. To only reorder within the same area you can also use orderCard.",
   annotations: {
     readOnlyHint: false,
     idempotentHint: true,
@@ -54,78 +53,25 @@ export default defineMcpTool({
       ),
   },
   inputExamples: [{ cardId: 1, toAreaId: 2, position: 0 }],
-  handler: async ({ cardId, toAreaId, position, newIndex, fromAreaId }) => {
+  handler: async ({ cardId, toAreaId, position, newIndex }) => {
     const userId = requireUserId();
     requireWriteAccess();
     if (!cardId || !toAreaId) {
       throw new McpError("VALIDATION", "cardId and toAreaId are required.");
     }
-    const { card, board } = await requireCard(cardId, userId, "edit");
-    const sourceAreaId = card.area;
-    const { area: toArea, board: toBoard } = await requireArea(
-      toAreaId,
-      userId,
-      "edit",
-    );
-
-    // Both ends are authorized individually, but a move ACROSS boards would
-    // leave the two halves disagreeing: the socket event goes to one board's
-    // room while the notification goes to the other, so neither board's viewers
-    // see a consistent picture. Cards move between areas of one board.
-    if (toBoard.id !== board.id) {
-      throw new McpError(
-        "VALIDATION",
-        "toAreaId belongs to a different board. A card can only move between areas of its own board.",
-      );
-    }
-
+    const from = await requireCard(cardId, userId, "edit");
+    const to = await requireArea(toAreaId, userId, "edit");
     // Counted among the cards `listCards` returns — archived ones are stepped
     // over — and the end of the column when no position is given (see
     // `cardPositions`).
-    const index = await putCard(db, toAreaId, cardId, position ?? newIndex ?? null);
-    if (sourceAreaId !== toAreaId) await renumberColumn(db, sourceAreaId);
-
-    // Notify collaborators (destination board) except the mover.
-    if (sourceAreaId !== toAreaId) {
-      const [[srcArea]]: any = await db.query(
-        "SELECT name FROM areas WHERE id = ?",
-        [sourceAreaId],
-      );
-      const [invited]: any = await db.execute(
-        "SELECT user FROM invitations WHERE board = ?",
-        [toBoard.id],
-      );
-      for (const notifyUserId of [
-        toBoard.user,
-        ...invited.map((i: any) => i.user),
-      ].filter(Boolean)) {
-        if (notifyUserId !== userId) {
-          await db.execute(
-            "INSERT INTO notifications (userId, type, boardId, cardId, message, actorId) VALUES (?, ?, ?, ?, ?, ?)",
-            [
-              notifyUserId,
-              "card_moved",
-              toBoard.id,
-              cardId,
-              `Card "${card.name}" moved from "${srcArea?.name}" to "${toArea.name}"`,
-                            userId,
-              ],
-          );
-        }
-      }
-    }
-
-    const serverSocket = getServerSocket();
-    if (serverSocket) {
-      serverSocket.to(`board-${board.id}`).emit("movedCard", {
-        cardId,
-        fromAreaId: sourceAreaId,
-        toAreaId,
-        newIndex: index,
-        boardId: board.id,
-      });
-    }
-
+    const { index } = await moveCard(
+      db,
+      from,
+      to,
+      userId,
+      position ?? newIndex ?? null,
+      true,
+    );
     return jsonResult({ moved: true, cardId, toAreaId, position: index });
   },
 });

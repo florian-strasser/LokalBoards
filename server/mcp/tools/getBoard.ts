@@ -1,5 +1,4 @@
 import { defineMcpTool } from "@nuxtjs/mcp-toolkit/server";
-import { setupDatabase } from "../../../app/lib/databaseSetup";
 import {
   requireUserId,
   requireBoard,
@@ -7,8 +6,6 @@ import {
   boardIdInput,
   serializeBoard,
 } from "../../utils/mcpHelpers";
-
-const db = setupDatabase();
 
 export default defineMcpTool({
   name: "getBoard",

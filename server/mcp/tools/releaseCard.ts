@@ -1,8 +1,9 @@
 import { defineMcpTool } from "@nuxtjs/mcp-toolkit/server";
 import { setupDatabase } from "../../../app/lib/databaseSetup";
-import { getServerSocket } from "../../utils/socket";
+import { emitToBoard } from "../../utils/socket";
+import { cardForBoard } from "../../utils/cards";
 import { recordCardActivity } from "../../utils/cardActivity";
-import { attachAssignees, releaseCardFor } from "../../utils/cardAssignees";
+import { releaseCardFor } from "../../utils/cardAssignees";
 import {
   requireUserId,
   requireWriteAccess,
@@ -33,24 +34,14 @@ export default defineMcpTool({
     const { board } = await requireCard(id, userId, "edit");
 
     const wasMine = await releaseCardFor(db, id, userId);
-    const [rows]: any = await db.execute("SELECT * FROM cards WHERE id = ?", [
-      id,
-    ]);
-    const [updated] = await attachAssignees(db, rows);
+    const updated = await cardForBoard(db, id);
 
     if (wasMine) {
       await recordCardActivity(id, "assigned", userId, {
         assigneeId: userId,
         removed: true,
       });
-      const serverSocket = getServerSocket();
-      if (serverSocket) {
-        serverSocket.to(`board-${board.id}`).emit("updateCard", {
-          boardId: board.id,
-          attachments: [],
-          card: { ...updated, status: !!updated.status },
-        });
-      }
+      emitToBoard(board.id, "updateCard", { boardId: board.id, attachments: [], card: updated });
     }
 
     return jsonResult({ released: wasMine, card: serializeCard(updated) });

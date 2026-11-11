@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { getAccountDeletedEmail } from "../server/utils/translations";
+import { getAccountDeletedEmail } from "../server/utils/emails";
 
 describe("getAccountDeletedEmail", () => {
   it("includes the app name and the admin's reason", () => {

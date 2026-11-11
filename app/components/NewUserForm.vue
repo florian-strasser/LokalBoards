@@ -121,7 +121,7 @@
     </div>
 </template>
 <script setup lang="ts">
-import { Zap } from "lucide-vue-next";
+import { Zap } from "@lucide/vue";
 
 const nuxtApp = useNuxtApp();
 

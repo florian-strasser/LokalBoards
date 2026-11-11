@@ -1,6 +1,6 @@
 import { getQuery } from "h3";
 import { setupDatabase } from "../../../app/lib/databaseSetup";
-import { hashInviteToken } from "../../utils/inviteToken";
+import { hashToken } from "../../utils/auth";
 
 // Looks up an invitation link so the sign-up form can show who it is for.
 //
@@ -26,7 +26,7 @@ export default defineEventHandler(async (event) => {
        FROM board_email_invites i
        LEFT JOIN boards b ON b.id = i.board
        WHERE i.tokenHash = ?`,
-      [hashInviteToken(token)],
+      [hashToken(token)],
     );
 
     const invite = rows[0];

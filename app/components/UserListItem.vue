@@ -82,7 +82,7 @@
     </div>
 </template>
 <script setup lang="ts">
-import { Trash2, SquarePen, VenetianMask, Bot } from "lucide-vue-next";
+import { Trash2, SquarePen, VenetianMask, Bot } from "@lucide/vue";
 
 const nuxtApp = useNuxtApp();
 const model = defineModel();

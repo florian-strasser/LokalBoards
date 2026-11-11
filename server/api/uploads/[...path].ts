@@ -1,13 +1,12 @@
-import { defineEventHandler, getRouterParams } from "h3";
-import { createError } from "h3";
-import { join, resolve, normalize } from "path";
-import { promises as fs } from "fs";
-import { createReadStream } from "fs";
-import { getFileExtension, getMimeType } from "../../utils/fileUtils";
+import { createReadStream, promises as fs } from "node:fs";
+import { basename, normalize } from "node:path";
+import { createError, defineEventHandler, getRouterParams } from "h3";
+import { getFileExtension, getMimeType, uploadedFile } from "../../utils/fileUtils";
 
+// An uploaded file, by the name the server gave it. No sign-in: the name is
+// random and long enough that knowing it is the permission.
 export default defineEventHandler(async (event) => {
   try {
-    // Get the file path from the URL
     const { path } = getRouterParams(event);
     if (!path) {
       throw createError({
@@ -16,31 +15,23 @@ export default defineEventHandler(async (event) => {
       });
     }
 
-    // Security: Prevent directory traversal using path.normalize and resolve
-    const normalizedPath = normalize(path).replace(/^(\.\.(\/|\\|$))+/, "");
-    const uploadDir = join(process.cwd(), "public", "uploads");
-    const fullPath = resolve(uploadDir, normalizedPath);
-
-    // Verify the resolved path is within the uploads directory
-    if (!fullPath.startsWith(resolve(uploadDir))) {
+    // A leading `../` is dropped rather than refused, and whatever is left has
+    // to be inside the folder.
+    const fullPath = uploadedFile(normalize(path).replace(/^(\.\.(\/|\\|$))+/, ""));
+    if (!fullPath) {
       throw createError({
         statusCode: 403,
         statusMessage: "Invalid request",
       });
     }
 
-    // Check if file exists
-    try {
-      await fs.access(fullPath);
-    } catch {
+    const stats = await fs.stat(fullPath).catch(() => null);
+    if (!stats) {
       throw createError({
         statusCode: 404,
         statusMessage: "Resource not found",
       });
     }
-
-    // Get file stats
-    const stats = await fs.stat(fullPath);
     if (!stats.isFile()) {
       throw createError({
         statusCode: 400,
@@ -48,28 +39,19 @@ export default defineEventHandler(async (event) => {
       });
     }
 
-    // Determine content type
-    const ext = getFileExtension(fullPath);
-    const contentType = getMimeType(ext) || "application/octet-stream";
-
-    // Set proper headers for file download
-    event.node.res.setHeader("Content-Type", contentType);
+    event.node.res.setHeader("Content-Type", getMimeType(getFileExtension(fullPath)));
     event.node.res.setHeader("Content-Length", stats.size);
-    // MEDIUM FIX: Don't expose original filename, use safe basename
-    const safeBasename = fullPath.split("\/").pop()?.split("\\").pop();
-    event.node.res.setHeader(
-      "Content-Disposition",
-      `inline; filename="${safeBasename || "file"}"`,
-    );
+    // The stored name, never the one it was uploaded under: that is the
+    // attachment's to give (see /api/data/attachment).
+    event.node.res.setHeader("Content-Disposition", `inline; filename="${basename(fullPath)}"`);
     event.node.res.setHeader("Cache-Control", "public, max-age=31536000");
-
-    // Stream the file
     return createReadStream(fullPath);
-  } catch (error) {
+  } catch (error: any) {
+    if (error?.statusCode) throw error;
     logger.error("File download error:", error);
     throw createError({
-      statusCode: error.statusCode || 500,
-      statusMessage: error.statusMessage || "Download failed",
+      statusCode: 500,
+      statusMessage: "Download failed",
     });
   }
 });

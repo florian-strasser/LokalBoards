@@ -43,7 +43,7 @@
 </template>
 
 <script setup lang="ts">
-import { Check, ListChecks, MessageSquareText } from "lucide-vue-next";
+import { Check, ListChecks, MessageSquareText } from "@lucide/vue";
 
 // The checklist out of the card's description. Six of them: enough to fill the
 // tile, and enough that the count visibly climbs rather than jumping.

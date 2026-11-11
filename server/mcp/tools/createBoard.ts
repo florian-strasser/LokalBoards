@@ -1,12 +1,12 @@
 import { z } from "zod";
 import { defineMcpTool } from "@nuxtjs/mcp-toolkit/server";
 import { setupDatabase } from "../../../app/lib/databaseSetup";
+import { createBoard } from "../../utils/boards";
 import {
   requireUserId,
   requireWriteAccess,
   serializeBoard,
 } from "../../utils/mcpHelpers";
-import { normalizeBoardColor } from "../../../app/utils/boardColor";
 
 const db = setupDatabase();
 
@@ -43,20 +43,14 @@ export default defineMcpTool({
   handler: async ({ name, style, status, image, color }) => {
     const userId = requireUserId();
     requireWriteAccess();
-    const [result]: any = await db.execute(
-      "INSERT INTO boards (user, name, style, image, color, status) VALUES (?, ?, ?, ?, ?, ?)",
-      [
-        userId,
-        name,
-        style || "kanban",
-        image || null,
-        image ? null : normalizeBoardColor(color),
-        status || "private",
-      ],
-    );
-    const [rows]: any = await db.execute("SELECT * FROM boards WHERE id = ?", [
-      result.insertId,
-    ]);
-    return jsonResult({ board: serializeBoard(rows[0]) });
+    const board = await createBoard(db, userId, {
+      name,
+      style: style || "kanban",
+      status: status || "private",
+      image: image || null,
+      // The image covers the tile, so a colour beside it could never be seen.
+      color: image ? null : color,
+    }, true);
+    return jsonResult({ board: serializeBoard(board) });
   },
 });

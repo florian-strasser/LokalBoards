@@ -204,7 +204,7 @@
 </template>
 
 <script setup lang="ts">
-import { Pen, Trash2, X, Bot } from "lucide-vue-next";
+import { Pen, Trash2, X, Bot } from "@lucide/vue";
 import { onResync, socket } from "~/lib/socket";
 import type { PropType } from "vue";
 

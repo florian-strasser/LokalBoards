@@ -1,6 +1,6 @@
 import { defineMcpTool } from "@nuxtjs/mcp-toolkit/server";
 import { setupDatabase } from "../../../app/lib/databaseSetup";
-import { getServerSocket } from "../../utils/socket";
+import { archiveBoard } from "../../utils/boards";
 import {
   requireUserId,
   requireWriteAccess,
@@ -14,12 +14,12 @@ const db = setupDatabase();
 
 export default defineMcpTool({
   name: "deleteBoard",
-  title: "Delete a board",
+  title: "Archive a board",
   description:
-    "Permanently delete a board and everything in it (areas, cards, comments, attachments, invitations, notifications). This cannot be undone and only the board owner can do it.",
+    "Archive a board with everything on it, as deleting one in the app does: it leaves the dashboard of everyone on it, keeps its areas, cards, comments, files and invitations, and can be restored from the owner's archive, where it is deleted for good after the retention period. Only the board's owner can do it.",
   annotations: {
     readOnlyHint: false,
-    destructiveHint: true,
+    destructiveHint: false,
     idempotentHint: true,
     openWorldHint: false,
   },
@@ -36,32 +36,8 @@ export default defineMcpTool({
         "Only the board owner can delete a board.",
       );
     }
-
-    const cardSubquery =
-      "SELECT id FROM cards WHERE area IN (SELECT id FROM areas WHERE board = ?)";
-    await db.execute(`DELETE FROM comments WHERE card IN (${cardSubquery})`, [
-      bid,
-    ]);
-    await db.execute(
-      `DELETE FROM attachments WHERE card IN (${cardSubquery})`,
-      [bid],
-    );
-    await db.execute("DELETE FROM invitations WHERE board = ?", [bid]);
-    await db.execute("DELETE FROM `webhooks` WHERE board = ?", [bid]);
-    await db.execute("DELETE FROM `board_placements` WHERE board = ?", [bid]);
-    await db.execute("DELETE FROM notifications WHERE boardId = ?", [bid]);
-    await db.execute(
-      "DELETE FROM cards WHERE area IN (SELECT id FROM areas WHERE board = ?)",
-      [bid],
-    );
-    await db.execute("DELETE FROM areas WHERE board = ?", [bid]);
-    await db.execute("DELETE FROM boards WHERE id = ?", [bid]);
-
-    const serverSocket = getServerSocket();
-    if (serverSocket) {
-      serverSocket.to(`board-${bid}`).emit("deletedBoard", { boardID: bid });
-    }
-
-    return jsonResult({ deleted: true, boardId: bid });
+    // Into the archive, as in the app: an agent's mistake can be undone there.
+    await archiveBoard(db, board, true);
+    return jsonResult({ archived: true, boardId: bid });
   },
 });

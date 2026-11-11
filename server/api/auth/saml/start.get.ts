@@ -1,6 +1,6 @@
 import { sendRedirect } from "h3";
-import { buildSaml, readSamlConfig, samlIsUsable } from "../../../utils/saml";
-import { findProvider } from "../../../utils/ssoProviders";
+import { buildSaml } from "../../../utils/saml";
+import { requestedProvider } from "../../../utils/ssoProviders";
 
 // Step one: build an AuthnRequest and send the browser to the provider with it.
 //
@@ -12,20 +12,18 @@ import { findProvider } from "../../../utils/ssoProviders";
 // `RelayState` — the provider echoes it back unchanged, and it is where the
 // browser should end up.
 export default defineEventHandler(async (event) => {
-  const requested = String(getQuery(event).provider || "");
-  const provider = requested ? findProvider(requested, event) : null;
-  if (requested && (!provider || provider.kind !== "saml")) {
-    event.res.statusCode = 404;
-    return { error: "saml_not_configured" };
-  }
-  const config = (provider?.config as any) ?? readSamlConfig(event);
-  if (!samlIsUsable(config)) {
+  const provider = requestedProvider(
+    "saml",
+    String(getQuery(event).provider || ""),
+    event,
+  );
+  if (!provider) {
     event.res.statusCode = 404;
     return { error: "saml_not_configured" };
   }
 
   try {
-    const saml = buildSaml(config, event, provider?.id);
+    const saml = buildSaml(provider.config, event, provider.id);
     const url = await saml.getAuthorizeUrlAsync("/dashboard/", undefined, {});
     return sendRedirect(event, url, 302);
   } catch (error) {

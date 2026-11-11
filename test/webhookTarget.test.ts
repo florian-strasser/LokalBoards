@@ -1,8 +1,6 @@
 import { describe, it, expect } from "vitest";
-import {
-  checkWebhookTarget,
-  isPrivateAddress,
-} from "../server/utils/webhookTarget";
+import { checkWebhookTarget } from "../server/utils/webhookTarget";
+import { isPublicAddress } from "../server/utils/netGuard";
 
 // The webhook URL is user-supplied but fetched by the server, so without these
 // checks it is an SSRF primitive pointed at the instance's own network.
@@ -32,9 +30,9 @@ describe("webhook target validation", () => {
   });
 
   it("classifies IPv4-mapped IPv6 loopback as private", () => {
-    expect(isPrivateAddress("::ffff:127.0.0.1")).toBe(true);
-    expect(isPrivateAddress("::ffff:7f00:1")).toBe(true);
-    expect(isPrivateAddress("::ffff:8.8.8.8")).toBe(false);
+    expect(isPublicAddress("::ffff:127.0.0.1")).toBe(false);
+    expect(isPublicAddress("::ffff:7f00:1")).toBe(false);
+    expect(isPublicAddress("::ffff:8.8.8.8")).toBe(true);
   });
 
   // Each of these was accepted by v0.40.3 (verified by running it). The URL

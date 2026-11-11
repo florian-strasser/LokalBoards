@@ -395,7 +395,7 @@ import {
     ListChecks,
     MessageSquareText,
     Clock,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import { peopleOn } from "@/utils/boardFilter";
 
 // Dates render in the instance's timezone and language, like everywhere else.

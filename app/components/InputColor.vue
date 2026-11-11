@@ -71,7 +71,7 @@
 </template>
 
 <script setup lang="ts">
-import { Pipette } from "lucide-vue-next";
+import { Pipette } from "@lucide/vue";
 import {
     BOARD_COLORS,
     boardTextColor,

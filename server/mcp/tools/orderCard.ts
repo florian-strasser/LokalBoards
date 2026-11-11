@@ -2,7 +2,7 @@ import { z } from "zod";
 import { defineMcpTool } from "@nuxtjs/mcp-toolkit/server";
 import { setupDatabase } from "../../../app/lib/databaseSetup";
 import { attachAssignees } from "../../utils/cardAssignees";
-import { getServerSocket } from "../../utils/socket";
+import { orderCard } from "../../utils/cards";
 import {
   requireUserId,
   requireWriteAccess,
@@ -56,43 +56,25 @@ export default defineMcpTool({
     const id = requireId(areaId, areaID, "areaId");
     const { board } = await requireArea(id, userId, "edit");
 
-    const cardIds = cardOrders.map((o: any) => o.cardId);
-    const placeholders = cardIds.map(() => "?").join(",");
-    const [belong]: any = await db.execute(
-      `SELECT id FROM cards WHERE id IN (${placeholders}) AND area = ?`,
-      [...cardIds, id],
+    const [belong]: any = await db.query(
+      "SELECT * FROM cards WHERE area = ? AND archivedAt IS NULL AND id IN (?)",
+      [id, cardOrders.map((order: any) => order.cardId)],
     );
-    if (belong.length !== cardOrders.length) {
-      throw new McpError(
-        "VALIDATION",
-        "Every cardId must belong to the given area.",
-      );
+    if (belong.length !== new Set(cardOrders.map((order: any) => order.cardId)).size) {
+      throw new McpError("VALIDATION", "Every cardId must be a card in the given area, not in the archive.");
     }
-
-    for (const order of cardOrders) {
-      await db.execute("UPDATE cards SET sort = ? WHERE id = ?", [
-        order.sort,
-        order.cardId,
-      ]);
+    // Lowest position first: each card put in place then stays there while the
+    // ones after it are placed. Positions are counted the way the board counts
+    // them, stepping over archived cards (see `cardPositions`).
+    const byId = new Map(belong.map((card: any) => [card.id, card]));
+    for (const order of [...cardOrders].sort((a: any, b: any) => a.sort - b.sort)) {
+      await orderCard(db, { card: byId.get(order.cardId), board }, order.sort, true);
     }
 
     const [rows]: any = await db.execute(
-      "SELECT * FROM cards WHERE area = ? ORDER BY sort ASC",
+      "SELECT * FROM cards WHERE area = ? AND archivedAt IS NULL ORDER BY sort ASC",
       [id],
     );
-
-    const serverSocket = getServerSocket();
-    if (serverSocket) {
-      for (const order of cardOrders) {
-        serverSocket.to(`board-${board.id}`).emit("orderdCard", {
-          cardId: order.cardId,
-          areaId: id,
-          newIndex: order.sort,
-          boardId: board.id,
-        });
-      }
-    }
-
     const cards = await attachAssignees(db, rows);
     return jsonResult({ cards: cards.map(serializeCard) });
   },

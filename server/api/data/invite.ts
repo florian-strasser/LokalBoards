@@ -1,287 +1,162 @@
-import { defineEventHandler, readBody, getQuery } from "h3";
-import { setupDatabase } from "../../../app/lib/databaseSetup";
+import { readBody } from "h3";
 import { sendEmail } from "../../../app/lib/sendEmail";
 import {
   getBoardInviteEmail,
   getBoardInviteSignupEmail,
-} from "../../utils/translations";
-import { createInviteToken, hashInviteToken } from "../../utils/inviteToken";
+} from "../../utils/emails";
+import { hashToken } from "../../utils/auth";
+import { newSecret } from "../../utils/oauth";
+import { isEmail } from "../../utils/password";
 
 const runtimeConfig = useRuntimeConfig();
 const appName = runtimeConfig.appName;
 const baseURL = runtimeConfig.boardsUrl;
 const defaultLanguage = runtimeConfig.language;
 
-export default defineEventHandler(async (event) => {
-  // Check the HTTP method
-  const method = event.req.method;
+// The people invited to a board, and adding or removing one. All of it is the
+// owner's alone: somebody invited to edit a board can change what is on it,
+// not who else may see it.
 
-  // Resolve the authenticated user (API key or session). All invite operations
-  // are owner-only, enforced per-method below via `board.user !== userId`.
-  const auth = await resolveUserId(event);
-  if (!auth.ok) {
-    event.res.statusCode = auth.status;
-    return { error: auth.error };
-  }
-  const userId = auth.userId;
+export default dataHandler({
+  // The invitations to a board, with the face and name of each person.
+  async GET({ db, userId, query, boardOf }) {
+    const { board } = await boardOf(query.boardId, "edit");
+    if (board.user !== userId) fail(403, "Unauthorized access");
 
-  try {
-    // Initialize database
-    const db = setupDatabase();
+    const [invitations] = await db.query(
+      `SELECT
+        invitations.*,
+        user.name AS userName,
+        user.image AS userImage
+      FROM invitations
+      LEFT JOIN user ON invitations.user = user.id
+      WHERE invitations.board = ?`,
+      [board.id],
+    );
+    return { invitations };
+  },
 
-    if (method === "GET") {
-      // Handle GET request to fetch invitations for a board
-      const query = getQuery(event);
-      const boardId = query.boardId;
-
-      // HIGH FIX: Validate boardId is a positive integer
-      if (!boardId || isNaN(Number(boardId)) || Number(boardId) <= 0) {
-        event.res.statusCode = 400;
-        return { error: "Invalid board ID" };
-      }
-
-      // Check if the board exists
-      const [boardRows] = await db.query("SELECT * FROM boards WHERE id = ?", [
-        boardId,
-      ]);
-      const board = boardRows[0];
-
-      if (!board) {
-        // HIGH FIX: Generic error to prevent board enumeration
-        event.res.statusCode = 404;
-        return { error: "Resource not found" };
-      }
-
-      if (board.user !== userId) {
-        event.res.statusCode = 403;
-        return { error: "Unauthorized access" };
-      }
-
-      // Fetch invitations for the board with user details
-      const [invitationRows] = await db.query(
-        `SELECT
-          invitations.*,
-          user.name AS userName,
-          user.image AS userImage
-        FROM invitations
-        LEFT JOIN user ON invitations.user = user.id
-        WHERE invitations.board = ?`,
-        [boardId],
-      );
-
-      return { invitations: invitationRows };
-    } else if (method === "POST") {
-      // Handle POST request to create an invitation
-      const {
-        boardId,
-        mail,
-        userId: inviteUserId,
-        permission,
-      } = await readBody(event);
-
-      // HIGH FIX: Validate required fields with generic message.
-      // The invitee is identified either by a picked user id (from the
-      // directory search) or, for backward compatibility, by email.
-      if (!boardId || (!mail && !inviteUserId) || !permission) {
-        event.res.statusCode = 400;
-        return { error: "Required fields are missing" };
-      }
-
-      // HIGH FIX: Validate boardId is a positive integer
-      if (isNaN(Number(boardId)) || Number(boardId) <= 0) {
-        event.res.statusCode = 400;
-        return { error: "Invalid board ID" };
-      }
-
-      // Check if the board exists
-      const [boardRows] = await db.query("SELECT * FROM boards WHERE id = ?", [
-        boardId,
-      ]);
-      const board = boardRows[0];
-
-      if (!board) {
-        // HIGH FIX: Generic error to prevent board enumeration
-        event.res.statusCode = 404;
-        return { error: "Resource not found" };
-      }
-
-      // Check if the authenticated user is the creator of the board
-      if (board.user !== userId) {
-        event.res.statusCode = 403;
-        return { error: "Unauthorized access" };
-      }
-
-      // Resolve the invited user — by picked id, else by email (legacy).
-      const [creatorRows] = inviteUserId
-        ? await db.query("SELECT * FROM user WHERE id = ?", [inviteUserId])
-        : await db.query("SELECT * FROM user WHERE email = ?", [mail]);
-      if (creatorRows.length === 0) {
-        // Nobody here holds that address. If the caller gave us one, invite them
-        // to the instance: a token goes to the address, and signing up through
-        // it creates the account and grants this board. Without an address —
-        // i.e. a picked user id that no longer resolves — there is nothing to
-        // send, and the response stays the same either way so a board owner
-        // still cannot use this to discover which addresses have accounts.
-        if (mail) {
-          const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-          const address = String(mail).trim().toLowerCase();
-
-          if (emailRegex.test(address)) {
-            await inviteByEmail({
-              db,
-              boardId: Number(boardId),
-              board,
-              address,
-              permission,
-              invitedBy: userId,
-              appName,
-              baseURL,
-              language: defaultLanguage,
-            });
-          }
-        }
-        return { message: "Invitation created successfully", invitation: null };
-      }
-      const creatorId = creatorRows[0].id;
-
-      // Check if the user is already invited to the board
-      const [existingInvitationRows] = await db.query(
-        "SELECT * FROM invitations WHERE board = ? AND user = ?",
-        [boardId, creatorId],
-      );
-
-      if (existingInvitationRows.length > 0) {
-        // HIGH FIX: Generic error
-        event.res.statusCode = 400;
-        return { error: "Invitation already exists" };
-      }
-      if (userId === creatorId) {
-        // HIGH FIX: Generic error
-        event.res.statusCode = 400;
-        return { error: "Cannot invite yourself" };
-      }
-      // Create the invitation
-      const [result] = await db.query(
-        "INSERT INTO invitations (board, user, permission) VALUES (?, ?, ?)",
-        [boardId, creatorId, permission],
-      );
-
-      // Email the invited user directly with a link to the board and their
-      // access level. Best-effort: a mail hiccup must not fail the invite.
-      try {
-        const [inviterRows] = await db.query(
-          "SELECT name FROM user WHERE id = ?",
-          [userId],
-        );
-        const { subject, html } = getBoardInviteEmail({
-          appName,
-          name: creatorRows[0].name,
-          inviterName: inviterRows[0]?.name || appName,
-          boardName: board.name,
-          permission,
-          boardURL: `${baseURL}/board/${boardId}`,
-          language: defaultLanguage,
-        });
-        await sendEmail({ to: creatorRows[0].email, subject, text: html });
-      } catch (mailError) {
-        logger.error("Board invite email failed:", mailError);
-      }
-
-      // Fetch the newly created invitation with user details
-      const [invitationRows] = await db.query(
-        `SELECT
-          invitations.*,
-          user.name AS userName,
-          user.image AS userImage
-        FROM invitations
-        LEFT JOIN user ON invitations.user = user.id
-        WHERE invitations.id = ?`,
-        [result.insertId],
-      );
-
-      // A new face on the board: every dashboard showing it has an avatar to
-      // add, and anyone with the board open has a member list to refresh.
-      await notifyBoardMembersChanged(boardId);
-      await notifyDashboards(db, boardId);
-
-      return {
-        message: "Invitation created successfully",
-        invitation: invitationRows[0],
-      };
-    } else if (method === "DELETE") {
-      // Handle DELETE request to remove an invitation
-      const query = getQuery(event);
-      const boardId = query.boardId;
-      const invitedUserId = query.userId;
-
-      // HIGH FIX: Validate boardId is a positive integer, userId is a valid UUID or integer
-      if (
-        !boardId ||
-        !invitedUserId ||
-        isNaN(Number(boardId)) ||
-        Number(boardId) <= 0
-      ) {
-        event.res.statusCode = 400;
-        return { error: "Invalid ID values" };
-      }
-
-      // Check if the board exists
-      const [boardRows] = await db.query("SELECT * FROM boards WHERE id = ?", [
-        boardId,
-      ]);
-      const board = boardRows[0];
-
-      if (!board) {
-        // HIGH FIX: Generic error to prevent board enumeration
-        event.res.statusCode = 404;
-        return { error: "Resource not found" };
-      }
-
-      // Check if the authenticated user is the creator of the board
-      if (board.user !== userId) {
-        event.res.statusCode = 403;
-        return { error: "Unauthorized access" };
-      }
-
-      // CRITICAL FIX: Only allow deleting invitations for users who have invitations to this board
-      // This prevents deleting arbitrary user IDs
-      const [existingInvitationRows] = await db.query(
-        "SELECT * FROM invitations WHERE board = ? AND user = ?",
-        [boardId, invitedUserId],
-      );
-
-      if (existingInvitationRows.length === 0) {
-        // HIGH FIX: Generic error to prevent invitation enumeration
-        event.res.statusCode = 404;
-        return { error: "Resource not found" };
-      }
-
-      // Remove the invitation and everything that hung off it (webhook
-      // subscriptions, notifications) — see removeBoardMember.
-      const removed = await removeBoardMember(db, boardId, invitedUserId);
-
-      if (!removed) {
-        // HIGH FIX: Generic error (should not happen due to check above, but kept for safety)
-        event.res.statusCode = 404;
-        return { error: "Resource not found" };
-      }
-
-      // The removed user's own dashboard has a tile to lose, and they are no
-      // longer a member — so they are told before the membership is re-read.
-      await notifyDashboards(db, boardId, [invitedUserId as string]);
-      await notifyBoardMembersChanged(boardId);
-      await notifyDashboards(db, boardId);
-
-      return { message: "Invitation removed successfully" };
-    } else {
-      event.res.statusCode = 405;
-      return { error: "Method not allowed" };
+  // Somebody given access, picked by their id from the directory or — the
+  // older way, and the only way for somebody without an account yet — by
+  // their address.
+  async POST({ event, db, userId, boardOf }) {
+    const { boardId, mail, userId: inviteeId, permission } = await readBody(event);
+    if (!boardId || (!mail && !inviteeId) || !permission) {
+      fail(400, "Required fields are missing");
     }
-  } catch (error) {
-    logger.error("Database error:", error);
-    event.res.statusCode = 500;
-    return { error: "Internal server error" };
-  }
+    const { board } = await boardOf(boardId, "edit");
+    if (board.user !== userId) fail(403, "Unauthorized access");
+
+    const [invitees] = inviteeId
+      ? await db.query("SELECT * FROM user WHERE id = ?", [inviteeId])
+      : await db.query("SELECT * FROM user WHERE email = ?", [mail]);
+    if (invitees.length === 0) {
+      // Nobody here holds that address. If the caller gave us one, invite them
+      // to the instance: a token goes to the address, and signing up through
+      // it creates the account and grants this board. Without an address —
+      // i.e. a picked user id that no longer resolves — there is nothing to
+      // send, and the response stays the same either way so a board owner
+      // still cannot use this to discover which addresses have accounts.
+      if (mail) {
+        const address = String(mail).trim().toLowerCase();
+
+        if (isEmail(address)) {
+          await inviteByEmail({
+            db,
+            boardId: board.id,
+            board,
+            address,
+            permission,
+            invitedBy: userId,
+            appName,
+            baseURL,
+            language: defaultLanguage,
+          });
+        }
+      }
+      return { message: "Invitation created successfully", invitation: null };
+    }
+    const invitee = invitees[0];
+
+    const [existing] = await db.query(
+      "SELECT id FROM invitations WHERE board = ? AND user = ?",
+      [board.id, invitee.id],
+    );
+    if (existing.length > 0) fail(400, "Invitation already exists");
+    if (userId === invitee.id) fail(400, "Cannot invite yourself");
+
+    const [result] = await db.query(
+      "INSERT INTO invitations (board, user, permission) VALUES (?, ?, ?)",
+      [board.id, invitee.id, permission],
+    );
+
+    // Email the invited user directly with a link to the board and their
+    // access level. Best-effort: a mail hiccup must not fail the invite.
+    try {
+      const [inviterRows] = await db.query("SELECT name FROM user WHERE id = ?", [
+        userId,
+      ]);
+      const { subject, html } = getBoardInviteEmail({
+        appName,
+        name: invitee.name,
+        inviterName: inviterRows[0]?.name || appName,
+        boardName: board.name,
+        permission,
+        boardURL: `${baseURL}/board/${board.id}`,
+        language: defaultLanguage,
+      });
+      await sendEmail({ to: invitee.email, subject, text: html });
+    } catch (mailError) {
+      logger.error("Board invite email failed:", mailError);
+    }
+
+    const [invitationRows] = await db.query(
+      `SELECT
+        invitations.*,
+        user.name AS userName,
+        user.image AS userImage
+      FROM invitations
+      LEFT JOIN user ON invitations.user = user.id
+      WHERE invitations.id = ?`,
+      [result.insertId],
+    );
+
+    // A new face on the board: every dashboard showing it has an avatar to
+    // add, and anyone with the board open has a member list to refresh.
+    await notifyBoardMembersChanged(board.id);
+    await notifyDashboards(db, board.id);
+
+    return {
+      message: "Invitation created successfully",
+      invitation: invitationRows[0],
+    };
+  },
+
+  // Somebody's access taken away again, with everything that hung off it
+  // (webhook subscriptions, notifications) — see removeBoardMember. Only an
+  // invitation to this board can be removed, so no other id can be reached
+  // through it.
+  async DELETE({ db, userId, query, boardOf }) {
+    const memberId = query.userId;
+    if (!memberId) fail(400, "Invalid ID values");
+    const { board } = await boardOf(
+      positiveId(query.boardId, "Invalid ID values"),
+      "edit",
+    );
+    if (board.user !== userId) fail(403, "Unauthorized access");
+
+    if (!(await removeBoardMember(db, board.id, String(memberId)))) {
+      fail(404, "Resource not found");
+    }
+
+    // The removed user's own dashboard has a tile to lose, and they are no
+    // longer a member — so they are told before the membership is re-read.
+    await notifyDashboards(db, board.id, [String(memberId)]);
+    await notifyBoardMembersChanged(board.id);
+    await notifyDashboards(db, board.id);
+
+    return { message: "Invitation removed successfully" };
+  },
 });
 
 // Invite an address that has no account here yet.
@@ -315,7 +190,8 @@ async function inviteByEmail({
   baseURL: string;
   language: string;
 }) {
-  const token = createInviteToken();
+  // 256 random bits, and only their hash is stored — like every other token.
+  const token = newSecret();
   const expiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
 
   try {
@@ -329,7 +205,7 @@ async function inviteByEmail({
         boardId,
         address,
         permission === "edit" ? "edit" : "read",
-        hashInviteToken(token),
+        hashToken(token),
         invitedBy,
         expiresAt,
       ],

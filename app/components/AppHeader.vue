@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { UsersRound, LogOut, UserRoundPen, Search } from "lucide-vue-next";
+import { UsersRound, LogOut, UserRoundPen, Search } from "@lucide/vue";
 
 // On a board drawn as a mind map the canvas runs on behind the header. There
 // the header floats above it: it is lifted over the map, and only the logo,

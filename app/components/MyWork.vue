@@ -107,7 +107,7 @@
 </template>
 
 <script setup lang="ts">
-import { Clock, ListChecks } from "lucide-vue-next";
+import { Clock, ListChecks } from "@lucide/vue";
 import { groupMyWork } from "@/utils/myWork";
 
 const { formatServerDate } = useServerDate();

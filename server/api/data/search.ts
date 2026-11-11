@@ -1,7 +1,6 @@
-import { defineEventHandler, getQuery } from "h3";
-import { setupDatabase } from "../../../app/lib/databaseSetup";
 // The same parser the board uses, so a result and its tile can never disagree.
 import { checklistProgress } from "../../../app/utils/checklistProgress";
+import { tileMembers } from "../../utils/boardTiles";
 import { attachAssignees } from "../../utils/cardAssignees";
 
 // GET /api/data/search?q=…
@@ -24,31 +23,17 @@ const LIVE_CARD = "c.archivedAt IS NULL AND a.archivedAt IS NULL";
 
 const PER_GROUP = 8;
 
-export default defineEventHandler(async (event) => {
-  if (event.req.method !== "GET") {
-    event.res.statusCode = 405;
-    return { error: "Method not allowed" };
-  }
+export default dataHandler({
+  async GET({ db, userId, query: params }) {
+    const raw = String(params.q ?? "").trim();
+    const empty = { boards: [], cards: [], comments: [], attachments: [] };
+    // Below two characters the result set is noise, and the LIKE scan isn't
+    // worth running.
+    if (raw.length < 2) return { query: raw, ...empty };
+    // A very long needle is pointless and just makes the scan expensive.
+    const query = raw.slice(0, 100);
+    const like = `%${escapeLike(query)}%`;
 
-  const auth = await resolveUserId(event);
-  if (!auth.ok) {
-    event.res.statusCode = auth.status;
-    return { error: auth.error };
-  }
-  const userId = auth.userId;
-
-  const raw = String(getQuery(event).q ?? "").trim();
-  const empty = { boards: [], cards: [], comments: [], attachments: [] };
-  // Below two characters the result set is noise, and the LIKE scan isn't worth
-  // running.
-  if (raw.length < 2) return { query: raw, ...empty };
-  // A very long needle is pointless and just makes the scan expensive.
-  const query = raw.slice(0, 100);
-  const like = `%${escapeLike(query)}%`;
-
-  const db = setupDatabase();
-
-  try {
     const [boards]: any = await db.execute(
       `SELECT b.id, b.name, b.style, b.image, b.user AS owner, (b.user = ?) AS owned
          FROM boards b
@@ -89,55 +74,24 @@ export default defineEventHandler(async (event) => {
     // board should say it here too rather than looking like a different card.
     const labelsByCard = new Map<number, any[]>();
     if (cards.length > 0) {
-      const cardPh = cards.map(() => "?").join(",");
-      const [labelRows]: any = await db.execute(
+      const [labelRows]: any = await db.query(
         `SELECT cl.card AS card, l.id, l.name
            FROM \`card_labels\` cl JOIN \`labels\` l ON l.id = cl.label
-          WHERE cl.card IN (${cardPh}) ORDER BY l.sort ASC, l.id ASC`,
-        cards.map((c: any) => c.id),
+          WHERE cl.card IN (?) ORDER BY l.sort ASC, l.id ASC`,
+        [cards.map((card: any) => card.id)],
       );
-      for (const row of labelRows as any[]) {
+      for (const row of labelRows) {
         if (!labelsByCard.has(row.card)) labelsByCard.set(row.card, []);
         labelsByCard.get(row.card)!.push({ id: row.id, name: row.name });
       }
     }
 
-    // Board hits show who is on the board, so attach the members the same way
-    // the dashboard does: the owner plus everyone invited, capped at the four
-    // the avatar stack shows.
-    const boardIds = boards.map((b: any) => b.id);
-    const membersByBoard = new Map<number, any[]>();
-    if (boardIds.length > 0) {
-      const ph = boardIds.map(() => "?").join(",");
-      const [inviteRows]: any = await db.execute(
-        `SELECT board, \`user\` FROM invitations WHERE board IN (${ph})`,
-        boardIds,
-      );
-      const idsByBoard = new Map<number, string[]>();
-      for (const b of boards)
-        idsByBoard.set(b.id, b.owner ? [b.owner] : []);
-      for (const inv of inviteRows) {
-        const list = idsByBoard.get(inv.board);
-        if (list && inv.user && !list.includes(inv.user)) list.push(inv.user);
-      }
-      const unique = [...new Set(([] as string[]).concat(...idsByBoard.values()))];
-      const usersById = new Map<string, any>();
-      if (unique.length > 0) {
-        const uph = unique.map(() => "?").join(",");
-        const [userRows]: any = await db.execute(
-          `SELECT id, name, image FROM \`user\` WHERE id IN (${uph})`,
-          unique,
-        );
-        for (const u of userRows) usersById.set(u.id, u);
-      }
-      for (const b of boards) {
-        const ids = idsByBoard.get(b.id) || [];
-        membersByBoard.set(b.id, {
-          count: ids.length,
-          list: ids.slice(0, 4).map((id) => usersById.get(id)).filter(Boolean),
-        } as any);
-      }
-    }
+    // Board hits show who is on the board, the way its tile on the dashboard
+    // does.
+    const members = await tileMembers(
+      db,
+      boards.map((board: any) => ({ id: board.id, user: board.owner })),
+    );
 
     const [comments]: any = await db.execute(
       `SELECT co.id, co.content, co.date,
@@ -177,8 +131,8 @@ export default defineEventHandler(async (event) => {
         style: b.style,
         image: b.image,
         owned: !!b.owned,
-        members: (membersByBoard.get(b.id) as any)?.list ?? [],
-        memberCount: (membersByBoard.get(b.id) as any)?.count ?? 0,
+        members: members.get(b.id)?.members ?? [],
+        memberCount: members.get(b.id)?.memberCount ?? 0,
       })),
       // The snippet is only sent when the description is what matched —
       // otherwise the card's own name already explains the hit.
@@ -226,9 +180,5 @@ export default defineEventHandler(async (event) => {
         boardName: at.boardName,
       })),
     };
-  } catch (error) {
-    logger.error("Search error:", error);
-    event.res.statusCode = 500;
-    return { error: "Internal server error" };
-  }
+  },
 });

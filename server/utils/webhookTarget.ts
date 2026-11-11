@@ -1,4 +1,4 @@
-import { checkPublicUrl, isPublicAddress, type LookupFunction } from "./netGuard";
+import { checkPublicUrl, type LookupFunction } from "./netGuard";
 
 // The webhook URL is supplied by a user but fetched by the SERVER, from inside
 // whatever network the instance runs in. Without a check that is a
@@ -14,11 +14,6 @@ import { checkPublicUrl, isPublicAddress, type LookupFunction } from "./netGuard
 // safeFetch, which runs the same rules inside the connection's own DNS lookup.
 
 export type WebhookTargetCheck = { ok: true } | { ok: false; reason: string };
-
-/** Whether an address is outside every public unicast range (or not an IP at all). */
-export function isPrivateAddress(ip: string): boolean {
-  return !isPublicAddress(ip);
-}
 
 /**
  * Validate a webhook URL: shape, scheme, length, no credentials, and that its

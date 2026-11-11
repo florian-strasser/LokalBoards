@@ -30,7 +30,7 @@
 </template>
 <script setup lang="ts">
 import { socket } from "~/lib/socket";
-import { Plus, X } from "lucide-vue-next";
+import { Plus, X } from "@lucide/vue";
 
 interface Comment {
     id: number;

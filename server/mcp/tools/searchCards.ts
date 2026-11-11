@@ -2,6 +2,7 @@ import { z } from "zod";
 import { defineMcpTool } from "@nuxtjs/mcp-toolkit/server";
 import { setupDatabase } from "../../../app/lib/databaseSetup";
 import { attachAssignees } from "../../utils/cardAssignees";
+import { cardFilter, labelsOn } from "../../utils/cardLists";
 import {
   requireUserId,
   requireBoard,
@@ -82,86 +83,35 @@ export default defineMcpTool({
     // bindable), so it must be an integer no matter what reaches the handler.
     const max = Math.min(100, Math.max(1, Math.trunc(Number(limit)) || 25));
 
-    // params holds the WHERE values only; the invitations join's userId is
-    // prepended at call time (it comes first in the statement).
-    // Archived work is not what an agent is being asked to look through.
-    const where: string[] = [
-      "c.archivedAt IS NULL",
-      "ar.archivedAt IS NULL",
-      "b.archivedAt IS NULL",
-      "(b.user = ? OR inv.user IS NOT NULL)",
-    ];
-    const params: any[] = [userId];
-    if (boardId) {
-      where.push("b.id = ?");
-      params.push(boardId);
-    }
-    if (areaId) {
-      where.push("c.area = ?");
-      params.push(areaId);
-    }
-    if (query) {
-      // A label is one of the words a card is findable by, the same as its name
-      // and its description — searching for "Bug" should turn up the cards
-      // marked Bug, not nothing.
-      where.push(
-        "(c.name LIKE ? OR c.content LIKE ? OR EXISTS (SELECT 1 FROM `card_labels` cl JOIN `labels` l ON l.id = cl.label WHERE cl.card = c.id AND l.name LIKE ?))",
-      );
-      params.push(`%${query}%`, `%${query}%`, `%${query}%`);
-    }
-    if (done !== undefined) {
-      where.push("c.status = ?");
-      params.push(done ? 1 : 0);
-    }
-    if (unassigned) {
-      where.push(
-        "NOT EXISTS (SELECT 1 FROM card_assignees ca WHERE ca.card = c.id)",
-      );
-    }
-    if (assigneeId) {
-      where.push(
-        "EXISTS (SELECT 1 FROM card_assignees ca WHERE ca.card = c.id AND ca.user = ?)",
-      );
-      params.push(assigneeId);
-    }
-    if (dueBefore) {
-      const d = new Date(dueBefore);
-      if (!Number.isNaN(d.getTime())) {
-        where.push("c.dueDate IS NOT NULL AND c.dueDate < ?");
-        params.push(d);
-      }
-    }
-
+    // The same filter GET /api/data/cards applies, on the boards the caller
+    // owns or was invited to. Archived work, whole boards of it included, is
+    // not what an agent is being asked to look through.
+    const filter = cardFilter({
+      text: query,
+      boardId,
+      areaId,
+      done,
+      assigneeId,
+      unassigned,
+      dueBefore,
+      openBoard: true,
+    });
     const [found]: any = await db.execute(
       `SELECT c.*, b.id AS boardId, b.name AS boardName, ar.name AS areaName
        FROM cards c
        JOIN areas ar ON ar.id = c.area
        JOIN boards b ON b.id = ar.board
        LEFT JOIN invitations inv ON inv.board = b.id AND inv.user = ?
-       WHERE ${where.join(" AND ")}
+       WHERE (b.user = ? OR inv.user IS NOT NULL) AND ${filter.where}
        ORDER BY c.sort ASC, c.id ASC
        LIMIT ${max}`,
-      // the invitations join takes the first userId, then the WHERE params
-      [userId, ...params],
+      [userId, userId, ...filter.params],
     );
     const rows = await attachAssignees(db, found);
 
     // The labels each hit wears, so a caller that searched by one can see it,
     // and one that did not still knows what the card says about itself.
-    const labelsByCard = new Map<number, string[]>();
-    if (rows.length > 0) {
-      const ph = rows.map(() => "?").join(",");
-      const [labelRows]: any = await db.execute(
-        `SELECT cl.card AS card, l.name
-           FROM \`card_labels\` cl JOIN \`labels\` l ON l.id = cl.label
-          WHERE cl.card IN (${ph}) ORDER BY l.sort ASC, l.id ASC`,
-        rows.map((row: any) => row.id),
-      );
-      for (const row of labelRows as any[]) {
-        if (!labelsByCard.has(row.card)) labelsByCard.set(row.card, []);
-        labelsByCard.get(row.card)!.push(row.name);
-      }
-    }
+    const labels = await labelsOn(db, rows.map((row: any) => row.id));
 
     return jsonResult({
       count: rows.length,
@@ -179,7 +129,7 @@ export default defineMcpTool({
           name: person.name ?? null,
           type: person.type ?? "human",
         })),
-        labels: labelsByCard.get(row.id) || [],
+        labels: (labels.get(row.id) ?? []).map((label) => label.name),
       })),
     });
   },

@@ -1,5 +1,8 @@
 import { z } from "zod";
 import { setupDatabase } from "../../app/lib/databaseSetup";
+import { areaAccess, boardAccess, cardAccess, type Level } from "./access";
+import { boardMemberIds } from "./cardAssignees";
+import type { AuthFailure } from "./auth";
 
 // Shared helpers for the MCP tools: authentication, scoped board access, stable
 // structured errors and consistent serialization. Tools throw `McpError` on
@@ -112,64 +115,101 @@ export function requireId(
   return Number(id);
 }
 
-// Resolve a board the caller can access at `level`, or throw. A board that
-// exists but the caller can't see is reported as NOT_FOUND (same as missing) so
-// ids can't be probed; a board the caller can read but not write is FORBIDDEN.
+// The board, area or card the caller can access at `level`, decided the same
+// way the REST API decides it (see access.ts), or thrown as the error an agent
+// reads: what is not there and what the caller may not see are both NOT_FOUND,
+// so ids can't be probed; what the caller can read but not change is FORBIDDEN.
+//
+// What is in the archive — a card, or the area or board it is in — is not
+// there for an agent either. In the app it is off the board: nobody changes,
+// moves or comments on it until it is restored, and neither does an agent that
+// happens to know its id.
+function refuse(result: AuthFailure, kind: string, id: number): never {
+  if (result.status === 404) missing(kind, id);
+  throw new McpError(
+    "FORBIDDEN",
+    `You have read-only access to this ${kind}'s board; this action needs edit access.`,
+  );
+}
+
+function missing(kind: string, id: number): never {
+  throw new McpError("NOT_FOUND", `No ${kind} with id ${id}.`);
+}
+
 export async function requireBoard(
   boardId: number,
   userId: string,
-  level: "read" | "edit",
+  level: Level,
 ) {
-  const [rows]: any = await db.execute("SELECT * FROM boards WHERE id = ?", [
-    boardId,
-  ]);
-  const board = rows[0];
-  if (!board) throw new McpError("NOT_FOUND", `No board with id ${boardId}.`);
-  const decision = await authorizeBoard(db, board, userId, level);
-  if (!decision.ok) {
-    if (decision.status === 404) {
-      throw new McpError("NOT_FOUND", `No board with id ${boardId}.`);
-    }
-    throw new McpError(
-      "FORBIDDEN",
-      `You have read-only access to board ${boardId}; this action needs edit access.`,
-    );
-  }
-  return board;
+  const found = await boardAccess(db, boardId, userId, level);
+  if (!found.ok) refuse(found, "board", boardId);
+  if (found.board.archivedAt) missing("board", boardId);
+  return found.board;
 }
 
-// Resolve a card (+ its board) the caller can access at `level`, or throw.
-export async function requireCard(
-  cardId: number,
-  userId: string,
-  level: "read" | "edit",
-) {
-  const [rows]: any = await db.execute(
-    "SELECT c.*, a.board AS boardId FROM cards c JOIN areas a ON a.id = c.area WHERE c.id = ?",
-    [cardId],
-  );
-  const card = rows[0];
-  if (!card) throw new McpError("NOT_FOUND", `No card with id ${cardId}.`);
-  const board = await requireBoard(card.boardId, userId, level);
-  return { card, board };
-}
-
-// Resolve an area (+ its board) the caller can access at `level`, or throw.
 export async function requireArea(
   areaId: number,
   userId: string,
-  level: "read" | "edit",
+  level: Level,
 ) {
-  const [rows]: any = await db.execute("SELECT * FROM areas WHERE id = ?", [
-    areaId,
-  ]);
-  const area = rows[0];
-  if (!area) throw new McpError("NOT_FOUND", `No area with id ${areaId}.`);
-  const board = await requireBoard(area.board, userId, level);
-  return { area, board };
+  const found = await areaAccess(db, areaId, userId, level);
+  if (!found.ok) refuse(found, "area", areaId);
+  if (found.area.archivedAt || found.board.archivedAt) missing("area", areaId);
+  return { area: found.area, board: found.board };
+}
+
+export async function requireCard(
+  cardId: number,
+  userId: string,
+  level: Level,
+) {
+  const found = await cardAccess(db, cardId, userId, level);
+  if (!found.ok) refuse(found, "card", cardId);
+  if (found.card.archivedAt || found.area.archivedAt || found.board.archivedAt) {
+    missing("card", cardId);
+  }
+  return {
+    card: { ...found.card, boardId: found.board.id },
+    area: found.area,
+    board: found.board,
+  };
+}
+
+// The people on a card can only be people on its board.
+export async function requireMembers(boardId: number, people: string[]) {
+  const members = await boardMemberIds(db, boardId);
+  const stranger = people.find((person) => !members.has(person));
+  if (stranger) {
+    throw new McpError(
+      "VALIDATION",
+      `'${stranger}' is not a member of this board (see listBoardMembers).`,
+    );
+  }
+}
+
+// A due date as an agent sends it: an ISO 8601 date, '' for none, or left out.
+export function dueDateFrom(value: string | null | undefined): Date | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === "" || value === null) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    throw new McpError("VALIDATION", "dueDate must be an ISO 8601 date or ''.");
+  }
+  return date;
 }
 
 // --- Serialization: one consistent shape per entity across every tool. ---
+
+export function serializeComment(comment: any) {
+  return {
+    id: comment.id,
+    cardId: comment.card,
+    authorId: comment.user ?? null,
+    authorName: comment.userName,
+    content: comment.content ?? "",
+    date: comment.date ? new Date(comment.date).toISOString() : null,
+  };
+}
 
 export function serializeBoard(board: any) {
   return {

@@ -79,7 +79,7 @@
     </div>
 </template>
 <script setup lang="ts">
-import { X } from "lucide-vue-next";
+import { X } from "@lucide/vue";
 import { ONBOARDING_STEPS } from "~/composables/useOnboarding";
 
 const { active, step, promptVisible, start, skip, cancel } = useOnboarding();

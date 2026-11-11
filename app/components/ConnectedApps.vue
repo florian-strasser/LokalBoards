@@ -41,7 +41,7 @@
 </template>
 
 <script setup lang="ts">
-import { Plug } from "lucide-vue-next";
+import { Plug } from "@lucide/vue";
 
 const connections = ref<any[]>([]);
 const { formatServerDate } = useServerDate();

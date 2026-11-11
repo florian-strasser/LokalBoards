@@ -49,7 +49,7 @@
 </template>
 
 <script setup lang="ts">
-import { Tag } from "lucide-vue-next";
+import { Tag } from "@lucide/vue";
 import { LABEL_NAME_MAX, resolveLabel } from "@/utils/labels";
 
 const props = defineProps({

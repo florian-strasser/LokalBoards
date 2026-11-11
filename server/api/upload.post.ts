@@ -1,183 +1,58 @@
-import { defineEventHandler, readMultipartFormData } from "h3";
-import { createError } from "h3";
-import { join } from "path";
-import { randomBytes } from "crypto";
-import { promises as fs } from "fs";
-import { getUserSession, getApiKeyUser } from "../utils/auth";
+import { createError, defineEventHandler } from "h3";
+import { requireUploader } from "../utils/auth";
+import { readUpload, writeUpload, type UploadKinds } from "../utils/fileUtils";
 
-// Allowed file types with their MIME types and magic bytes signatures
-const ALLOWED_FILE_TYPES = {
-  // PDF
-  "application/pdf": { extensions: ["pdf"], magic: [0x25, 0x50, 0x44, 0x46] },
-  // Word
-  "application/msword": {
-    extensions: ["doc"],
-    magic: [0xd0, 0xcf, 0x11, 0xe0],
-  },
+// What can be attached to a card, and the extension it is stored under. The
+// extension comes from the type the file proved it is, never from the name it
+// arrived with.
+const ATTACHMENTS: UploadKinds = {
+  "application/pdf": { extension: "pdf", magic: [0x25, 0x50, 0x44, 0x46] },
+  "application/msword": { extension: "doc", magic: [0xd0, 0xcf, 0x11, 0xe0] },
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document": {
-    extensions: ["docx"],
+    extension: "docx",
     magic: [0x50, 0x4b, 0x03, 0x04],
   },
-  // Excel
-  "application/vnd.ms-excel": {
-    extensions: ["xls"],
-    magic: [0xd0, 0xcf, 0x11, 0xe0],
-  },
+  "application/vnd.ms-excel": { extension: "xls", magic: [0xd0, 0xcf, 0x11, 0xe0] },
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
-    extensions: ["xlsx"],
+    extension: "xlsx",
     magic: [0x50, 0x4b, 0x03, 0x04],
   },
-  // CSV (check for text content)
-  "text/csv": { extensions: ["csv"], magic: null },
-  // PowerPoint
-  "application/vnd.ms-powerpoint": {
-    extensions: ["ppt"],
-    magic: [0xd0, 0xcf, 0x11, 0xe0],
-  },
+  // Plain text has no signature to check.
+  "text/csv": { extension: "csv", magic: null },
+  "application/vnd.ms-powerpoint": { extension: "ppt", magic: [0xd0, 0xcf, 0x11, 0xe0] },
   "application/vnd.openxmlformats-officedocument.presentationml.presentation": {
-    extensions: ["pptx"],
+    extension: "pptx",
     magic: [0x50, 0x4b, 0x03, 0x04],
   },
-  // Images
-  "image/jpeg": { extensions: ["jpg", "jpeg"], magic: [0xff, 0xd8, 0xff] },
-  "image/png": { extensions: ["png"], magic: [0x89, 0x50, 0x4e, 0x47] },
-  // ZIP
-  "application/zip": { extensions: ["zip"], magic: [0x50, 0x4b, 0x03, 0x04] },
+  "image/jpeg": { extension: "jpg", magic: [0xff, 0xd8, 0xff] },
+  "image/png": { extension: "png", magic: [0x89, 0x50, 0x4e, 0x47] },
+  "application/zip": { extension: "zip", magic: [0x50, 0x4b, 0x03, 0x04] },
 };
 
-// Max file size: 50MB for general uploads
 const MAX_FILE_SIZE = 50 * 1024 * 1024;
 
+// A file for a card, kept as it arrived: somebody attached it deliberately
+// and expects to download it unchanged.
 export default defineEventHandler(async (event) => {
   try {
-    // CRITICAL FIX: Require authentication - check session first
-    const session = await getUserSession(event);
-    const apiKeyUser = await getApiKeyUser(event);
-
-    if (!session && !apiKeyUser) {
-      throw createError({
-        statusCode: 401,
-        statusMessage: "Unauthorized",
-      });
-    }
-
-    // Get authenticated user ID
-    const userId = session?.user?.id || apiKeyUser?.user?.id;
-    if (!userId) {
-      throw createError({
-        statusCode: 401,
-        statusMessage: "Unauthorized",
-      });
-    }
-
-    // Ensure this is a multipart form request
-    const contentType = event.node.req.headers["content-type"];
-    if (!contentType || !contentType.includes("multipart/form-data")) {
-      throw createError({
-        statusCode: 400,
-        statusMessage: "Invalid request",
-      });
-    }
-
-    // Parse the multipart form data
-    const formData = await readMultipartFormData(event);
-
-    if (!formData || formData.length === 0) {
-      throw createError({
-        statusCode: 400,
-        statusMessage: "Invalid request",
-      });
-    }
-
-    const file = formData[0];
-
-    if (!file) {
-      throw createError({
-        statusCode: 400,
-        statusMessage: "Invalid request",
-      });
-    }
-
-    // Validate file has data
-    if (!file.filename) {
-      throw createError({
-        statusCode: 400,
-        statusMessage: "Invalid request",
-      });
-    }
-
-    // Validate it's an allowed MIME type
-    const normalizedType = file.type.toLowerCase();
-    const fileInfo = ALLOWED_FILE_TYPES[normalizedType];
-
-    if (!fileInfo) {
-      throw createError({
-        statusCode: 400,
-        statusMessage: "Invalid request",
-      });
-    }
-
-    // Get file buffer
-    const fileBuffer = Buffer.isBuffer(file.data)
-      ? file.data
-      : Buffer.from(file.data);
-
-    // Validate file size
-    if (fileBuffer.length > MAX_FILE_SIZE) {
-      throw createError({
-        statusCode: 400,
-        statusMessage: "Invalid request",
-      });
-    }
-
-    // Validate magic bytes for non-CSV files (CSV is text-based and harder to validate)
-    if (fileInfo.magic && fileBuffer.length >= fileInfo.magic.length) {
-      const magicBytes = Array.from(
-        fileBuffer.subarray(0, fileInfo.magic.length),
-      );
-      const magicBytesMatch = fileInfo.magic.every(
-        (byte, index) => magicBytes[index] === byte,
-      );
-
-      if (!magicBytesMatch) {
-        throw createError({
-          statusCode: 400,
-          statusMessage: "Invalid request",
-        });
-      }
-    }
-
-    // Security: Use validated file type for extension, not user-provided filename
-    const fileExt = fileInfo.extensions[0];
-
-    const safeFilename = `${randomBytes(16).toString("hex")}.${fileExt}`;
-
-    // Create uploads directory if it doesn't exist
-    const uploadDir = join(process.cwd(), "public", "uploads");
-    try {
-      await fs.mkdir(uploadDir, { recursive: true });
-    } catch (err) {
-      logger.error("Failed to create upload directory:", err);
-      throw createError({
-        statusCode: 500,
-        statusMessage: "Upload failed",
-      });
-    }
-
-    // Save the file
-    const filePath = join(uploadDir, safeFilename);
-    await fs.writeFile(filePath, fileBuffer);
-
-    // Return the URL where the file can be accessed
-    const fileUrl = `/api/uploads/${safeFilename}`;
-
+    await requireUploader(event);
+    const { file, data, extension } = await readUpload(
+      event,
+      ATTACHMENTS,
+      MAX_FILE_SIZE,
+      // The first part, and only if it is a file rather than a plain field.
+      (parts) => (parts[0].filename ? parts[0] : undefined),
+    );
     return {
       success: true,
-      url: fileUrl,
+      url: await writeUpload(data, extension),
       type: file.type,
-      size: fileBuffer.length,
+      size: data.length,
     };
-  } catch (error) {
+  } catch (error: any) {
+    // A refusal — not signed in, a read-only key, a file of the wrong kind —
+    // keeps its own status; only something unexpected is the server's fault.
+    if (error?.statusCode) throw error;
     logger.error("File upload error:", error);
     throw createError({
       statusCode: 500,

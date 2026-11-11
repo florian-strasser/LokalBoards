@@ -511,8 +511,8 @@ import {
     Ban,
     X,
     FileSpreadsheet,
-} from "lucide-vue-next";
-import { Plus } from "lucide-vue-next";
+} from "@lucide/vue";
+import { Plus } from "@lucide/vue";
 
 const nuxtApp = useNuxtApp();
 

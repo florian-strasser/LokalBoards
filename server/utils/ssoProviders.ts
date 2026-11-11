@@ -1,5 +1,5 @@
-import { ssoConfigFrom, type SsoConfig } from "./sso";
-import { samlConfigFrom, type SamlConfig } from "./saml";
+import { ssoConfigFrom, ssoIsUsable, type SsoConfig } from "./sso";
+import { samlConfigFrom, samlIsUsable, type SamlConfig } from "./saml";
 
 // Which identity providers this instance offers.
 //
@@ -126,7 +126,7 @@ export function listProviders(event?: any): Provider[] {
 
   const addOidc = (id: string, config: any) => {
     const parsed = ssoConfigFrom(config);
-    if (!ssoIsUsableConfig(parsed)) return;
+    if (!ssoIsUsable(parsed)) return;
     providers.push({
       id,
       kind: "oidc",
@@ -137,7 +137,7 @@ export function listProviders(event?: any): Provider[] {
   };
   const addSaml = (id: string, config: any) => {
     const parsed = samlConfigFrom(config);
-    if (!samlIsUsableConfig(parsed)) return;
+    if (!samlIsUsable(parsed)) return;
     providers.push({
       id,
       kind: "saml",
@@ -181,6 +181,38 @@ export function findProvider(id: string, event?: any): Provider | null {
   return listProviders(event).find((provider) => provider.id === wanted) ?? null;
 }
 
+/**
+ * The provider a sign-in step is for: the one named, or the unprefixed one —
+ * `sso` or `saml` — when no name is given. Null, which the endpoints answer
+ * with a 404, when the name is unknown, names a provider of the other kind, or
+ * the provider is not configured well enough to use (listProviders leaves
+ * those out).
+ */
+export function requestedProvider(
+  kind: "oidc",
+  name: string,
+  event?: any,
+): (Provider & { config: SsoConfig }) | null;
+export function requestedProvider(
+  kind: "saml",
+  name: string,
+  event?: any,
+): (Provider & { config: SamlConfig }) | null;
+export function requestedProvider(
+  kind: ProviderKind,
+  name: string,
+  event?: any,
+): Provider | null {
+  const provider = findProvider(name || (kind === "oidc" ? "sso" : "saml"), event);
+  return provider?.kind === kind ? provider : null;
+}
+
+/** Where a provider's sign-in button goes. */
+export function providerStartPath(provider: Provider): string {
+  const route = provider.kind === "oidc" ? "sso" : "saml";
+  return `/api/auth/${route}/start?provider=${encodeURIComponent(provider.id)}`;
+}
+
 // Which provider signs in this address, if any. Longest domain wins, so a
 // subsidiary's own provider beats the parent's catch-all.
 export function providerForEmail(
@@ -196,19 +228,5 @@ export function providerForEmail(
   );
   return (
     matches.sort((a, b) => Math.max(...b.domains.map((d) => d.length)) - Math.max(...a.domains.map((d) => d.length)))[0] ?? null
-  );
-}
-
-// The usability checks, taking an already-parsed config rather than reading the
-// environment again.
-function ssoIsUsableConfig(config: SsoConfig): boolean {
-  if (!config.enabled) return false;
-  if (!config.clientId || !config.clientSecret) return false;
-  return Boolean(config.issuer || (config.authorizationUrl && config.tokenUrl));
-}
-
-function samlIsUsableConfig(config: SamlConfig): boolean {
-  return Boolean(
-    config.enabled && config.entryPoint && config.idpCert.length && config.entityId,
   );
 }

@@ -142,7 +142,7 @@ import {
     Code,
     ListChecks,
     Smile,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import { useEditor, EditorContent } from "@tiptap/vue-3";
 import { Placeholder } from "@tiptap/extensions";
 import { TaskItem, TaskList } from "@tiptap/extension-list";

@@ -40,7 +40,7 @@
     </div>
 </template>
 <script setup lang="ts">
-import { Timer, Trash2 } from "lucide-vue-next";
+import { Timer, Trash2 } from "@lucide/vue";
 
 const props = defineProps({
     id: String,

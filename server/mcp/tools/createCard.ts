@@ -1,24 +1,17 @@
 import { z } from "zod";
 import { defineMcpTool } from "@nuxtjs/mcp-toolkit/server";
 import { setupDatabase } from "../../../app/lib/databaseSetup";
-import { getServerSocket } from "../../utils/socket";
-import { nextCardSort } from "../../utils/cardPositions";
-import { repeatAfterEdit } from "../../utils/repeat";
-import {
-  assigneeIdsFrom,
-  attachAssignees,
-  boardMemberIds,
-  setCardAssignees,
-} from "../../utils/cardAssignees";
-import { dispatchWebhooks } from "../../utils/webhooks";
+import { assigneeIdsFrom } from "../../utils/cardAssignees";
+import { createCard } from "../../utils/cards";
 import {
   requireUserId,
-  requireWriteAccess,
   requireArea,
+  requireWriteAccess,
+  requireMembers,
   requireId,
+  dueDateFrom,
   areaIdInput,
   serializeCard,
-  McpError,
 } from "../../utils/mcpHelpers";
 
 const db = setupDatabase();
@@ -95,126 +88,17 @@ export default defineMcpTool({
     const userId = requireUserId();
     requireWriteAccess();
     const id = requireId(areaId, areaID, "areaId");
-    const { board } = await requireArea(id, userId, "edit");
-
-    // Retry-safe: the same key in the same area returns the card made earlier.
-    if (idempotencyKey) {
-      const [existing]: any = await db.execute(
-        "SELECT * FROM cards WHERE area = ? AND idempotencyKey = ?",
-        [id, idempotencyKey],
-      );
-      if (existing[0]) {
-        const [card] = await attachAssignees(db, existing);
-        return jsonResult({ card: serializeCard(card), created: false });
-      }
-    }
-
-    let due: Date | null = null;
-    if (dueDate) {
-      const d = new Date(dueDate);
-      if (Number.isNaN(d.getTime())) {
-        throw new McpError("VALIDATION", "dueDate must be an ISO 8601 date.");
-      }
-      due = d;
-    }
-    const people = assigneeIdsFrom(
-      assigneeIds ?? (assigneeId ? [assigneeId] : []),
+    const { area, board } = await requireArea(id, userId, "edit");
+    const due = dueDateFrom(dueDate);
+    const people = assigneeIdsFrom(assigneeIds ?? (assigneeId ? [assigneeId] : []));
+    await requireMembers(board.id, people);
+    const { card, created } = await createCard(
+      db,
+      { area, board },
+      userId,
+      { name, content, done, dueDate: due ?? null, repeat, assigneeIds: people, idempotencyKey },
+      true,
     );
-    const members = await boardMemberIds(db, board.id);
-    const stranger = people.find((id) => !members.has(id));
-    if (stranger) {
-      throw new McpError(
-        "VALIDATION",
-        `'${stranger}' is not a member of this board (see listBoardMembers).`,
-      );
-    }
-
-    // After the highest number in the column, not after however many cards
-    // it has (see `cardPositions`).
-    const sort = await nextCardSort(db, id);
-
-    // Where the series is counted from, and when it is next owed a card — the
-    // due date if there is one, otherwise from now (see `repeat.ts`).
-    const repeatState = repeatAfterEdit({ area: id }, repeat, due, true);
-
-    let insertId: number;
-    try {
-      const [result]: any = await db.execute(
-        "INSERT INTO cards (area, name, content, status, sort, dueDate, idempotencyKey, repeatEvery, repeatAnchor, repeatArea, repeatNext) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        [
-          id,
-          name,
-          content || "",
-          done ? 1 : 0,
-          sort,
-          due,
-          idempotencyKey || null,
-          repeat || null,
-          repeat ? repeatState.repeatAnchor : null,
-          repeat ? id : null,
-          repeat ? repeatState.repeatNext : null,
-        ],
-      );
-      insertId = result.insertId;
-    } catch (err: any) {
-      // Lost a race against a concurrent retry with the same key — return the
-      // card that won instead of failing.
-      if (err?.code === "ER_DUP_ENTRY" && idempotencyKey) {
-        const [existing]: any = await db.execute(
-          "SELECT * FROM cards WHERE area = ? AND idempotencyKey = ?",
-          [id, idempotencyKey],
-        );
-        if (existing[0]) {
-          const [card] = await attachAssignees(db, existing);
-          return jsonResult({ card: serializeCard(card), created: false });
-        }
-      }
-      throw err;
-    }
-    await setCardAssignees(db, insertId, board.id, people);
-    const [rows]: any = await db.execute("SELECT * FROM cards WHERE id = ?", [
-      insertId,
-    ]);
-    const [card] = await attachAssignees(db, rows);
-
-    // Notify the board owner + collaborators (except the creator).
-    const [invited]: any = await db.execute(
-      "SELECT user FROM invitations WHERE board = ?",
-      [board.id],
-    );
-    for (const notifyUserId of [
-      board.user,
-      ...invited.map((i: any) => i.user),
-    ].filter(Boolean)) {
-      if (notifyUserId !== userId) {
-        await db.execute(
-          "INSERT INTO notifications (userId, type, boardId, cardId, message, actorId) VALUES (?, ?, ?, ?, ?, ?)",
-          [
-            notifyUserId,
-            "card_created",
-            board.id,
-            card.id,
-            `New card created: ${card.name}`,
-                          userId,
-              ],
-        );
-      }
-    }
-
-    const serverSocket = getServerSocket();
-    if (serverSocket) {
-      serverSocket
-        .to(`board-${board.id}`)
-        .emit("addCard", { boardId: board.id, card });
-    }
-
-    dispatchWebhooks({
-      boardId: board.id,
-      event: "card.created",
-      actorUserId: userId,
-      card: serializeCard(card),
-    });
-
-    return jsonResult({ card: serializeCard(card), created: true });
+    return jsonResult({ card: serializeCard(card), created });
   },
 });

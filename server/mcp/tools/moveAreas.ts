@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { defineMcpTool } from "@nuxtjs/mcp-toolkit/server";
 import { setupDatabase } from "../../../app/lib/databaseSetup";
-import { getServerSocket } from "../../utils/socket";
+import { orderAreas } from "../../utils/areas";
 import {
   requireUserId,
   requireWriteAccess,
@@ -41,44 +41,14 @@ export default defineMcpTool({
     requireWriteAccess();
     const bid = requireId(boardId, boardID, "boardId");
     await requireBoard(bid, userId, "edit");
-
-    const ids = areaIds ?? (areas || []).map((a: any) => a.id);
+    const ids = (areaIds ?? (areas || []).map((a: any) => a.id)).map(Number);
     if (!ids.length) {
       throw new McpError("VALIDATION", "Provide areaIds in the new order.");
     }
-    const placeholders = ids.map(() => "?").join(",");
-    const [belong]: any = await db.execute(
-      `SELECT id FROM areas WHERE id IN (${placeholders}) AND board = ?`,
-      [...ids, bid],
-    );
-    if (belong.length !== ids.length) {
-      throw new McpError(
-        "VALIDATION",
-        "Every area id must belong to the board.",
-      );
+    const ordered = await orderAreas(db, bid, ids, true);
+    if (!ordered) {
+      throw new McpError("VALIDATION", "Every area id must belong to the board.");
     }
-
-    for (let i = 0; i < ids.length; i++) {
-      await db.execute("UPDATE areas SET sort = ? WHERE id = ? AND board = ?", [
-        i,
-        ids[i],
-        bid,
-      ]);
-    }
-
-    const [rows]: any = await db.execute(
-      "SELECT * FROM areas WHERE board = ? ORDER BY sort",
-      [bid],
-    );
-
-    const serverSocket = getServerSocket();
-    if (serverSocket) {
-      serverSocket.to(`board-${bid}`).emit("updateAreas", {
-        areas: rows,
-        boardId: bid,
-      });
-    }
-
-    return jsonResult({ areas: rows.map(serializeArea) });
+    return jsonResult({ areas: ordered.map(serializeArea) });
   },
 });

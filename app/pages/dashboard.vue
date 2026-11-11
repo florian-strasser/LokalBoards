@@ -20,7 +20,11 @@
                 <!-- Only for somebody with work to show. Without an open card
                      on them the heading is Boards and nothing else, as it was
                      before My work existed. -->
-                <template v-if="hasMyWork">
+                <!-- Activity is reached from the bell, not from the switch:
+                     it is not a third list of the same boards but what happened
+                     on them, and it names itself while it is shown. -->
+                <template v-if="feed">{{ $t("activityFeed") }}</template>
+                <template v-else-if="hasMyWork">
                 <span class="md:hidden">{{
                     myWork ? $t("myWork") : $t("boards")
                 }}</span>
@@ -75,7 +79,7 @@
                     </ActionMenu>
                 </template>
             </SectionHeader>
-            <div v-if="hasMyWork" class="-mt-4 mb-8 md:hidden">
+            <div v-if="hasMyWork && !feed" class="-mt-4 mb-8 md:hidden">
                 <SegmentedControl
                     :values="[
                         { value: 'boards', label: $t('boards') },
@@ -85,7 +89,8 @@
                     v-model="view"
                 />
             </div>
-            <MyWork v-if="session && myWork" />
+            <NotificationFeed v-if="session && feed" :userID="userID" />
+            <MyWork v-else-if="session && myWork" />
             <BoardDashboard
                 v-else-if="session"
                 @new-board="openCreateBoard"
@@ -302,7 +307,7 @@ import {
     FileSpreadsheet,
     Import,
     Upload,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 
 const nuxtApp = useNuxtApp();
 
@@ -331,6 +336,8 @@ const hasMyWork = computed(() => Number(workCount.value?.count ?? 0) > 0);
 const myWork = computed(
     () => hasMyWork.value && route.query.view === "mine",
 );
+// Your notifications on a page of their own — see NotificationFeed.
+const feed = computed(() => route.query.view === "feed");
 // A bookmark or a link to My work, followed with nothing in it, lands on the
 // boards rather than on an empty view.
 if (route.query.view === "mine" && !hasMyWork.value) {

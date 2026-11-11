@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { defineMcpTool } from "@nuxtjs/mcp-toolkit/server";
 import { setupDatabase } from "../../../app/lib/databaseSetup";
-import { getServerSocket } from "../../utils/socket";
+import { updateBoard } from "../../utils/boards";
 import {
   requireUserId,
   requireWriteAccess,
@@ -59,69 +59,27 @@ export default defineMcpTool({
         "Only the board owner can change board settings.",
       );
     }
+    // An agent is told when its colour is not one, rather than finding the
+    // board with no colour at all — which is how one would be stored.
+    if (color !== undefined && color !== "" && normalizeBoardColor(color) === null) {
+      throw new McpError(
+        "VALIDATION",
+        "color must be a hex colour such as '#2563eb', or '' to clear it.",
+      );
+    }
 
-    const fields: string[] = [];
-    const values: any[] = [];
-    if (name !== undefined) {
-      fields.push("name = ?");
-      values.push(name);
-    }
-    if (style !== undefined) {
-      fields.push("style = ?");
-      values.push(style);
-    }
-    if (status !== undefined) {
-      fields.push("status = ?");
-      values.push(status);
-    }
-    if (image !== undefined) {
-      fields.push("image = ?");
-      values.push(image === "" ? null : image);
-      // The image sits on top of the colour, so keeping both would leave a
-      // colour that can never be seen.
-      if (image !== "" && color === undefined) {
-        fields.push("color = ?");
-        values.push(null);
-      }
-    }
-    if (color !== undefined) {
-      const normalized = normalizeBoardColor(color);
-      if (color !== "" && normalized === null) {
-        throw new McpError(
-          "VALIDATION",
-          "color must be a hex colour such as '#2563eb', or '' to clear it.",
-        );
-      }
-      fields.push("color = ?");
-      values.push(normalized);
-      if (normalized && image === undefined) {
-        fields.push("image = ?");
-        values.push(null);
-      }
-    }
-    if (fields.length === 0) {
+    const patch = {
+      name,
+      style,
+      status,
+      image: image === undefined ? undefined : image || null,
+      color,
+    };
+    if (Object.values(patch).every((value) => value === undefined)) {
       throw new McpError("VALIDATION", "Provide at least one field to update.");
     }
-
-    await db.execute(`UPDATE boards SET ${fields.join(", ")} WHERE id = ?`, [
-      ...values,
-      bid,
-    ]);
-    const [rows]: any = await db.execute("SELECT * FROM boards WHERE id = ?", [
-      bid,
-    ]);
-    const updated = rows[0];
-
-    const serverSocket = getServerSocket();
-    if (serverSocket) {
-      serverSocket.to(`board-${bid}`).emit("updateBoard", {
-        boardID: bid,
-        boardName: updated.name,
-        boardStatus: updated.status,
-        boardStyle: updated.style,
-      });
-    }
-
+    const updated = await updateBoard(db, board, patch, true);
+    if (!updated) throw new McpError("NOT_FOUND", `No board with id ${bid}.`);
     return jsonResult({ board: serializeBoard(updated) });
   },
 });

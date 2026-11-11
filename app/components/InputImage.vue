@@ -73,7 +73,7 @@
 </template>
 
 <script setup lang="ts">
-import { Plus, Trash2 } from "lucide-vue-next";
+import { Plus, Trash2 } from "@lucide/vue";
 
 const props = defineProps({
     label: String,

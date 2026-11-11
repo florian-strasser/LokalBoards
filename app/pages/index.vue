@@ -104,7 +104,7 @@
 <script setup lang="ts">
 import { safeRedirect } from "@/utils/redirectTarget";
 import * as z from "zod";
-import { KeyRound } from "lucide-vue-next";
+import { KeyRound } from "@lucide/vue";
 
 const nuxtApp = useNuxtApp();
 const allowSignup =

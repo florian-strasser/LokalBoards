@@ -155,6 +155,21 @@ try {
 
   const [[rows]] = await c.query("SELECT COUNT(*) AS n FROM comments");
   check("and the database holds exactly what was written", rows.n === 2, `${rows.n} rows`);
+
+  // A checklist in somebody else's comment can be ticked by anybody who may
+  // edit the board. The server once compared against the HTML comments were
+  // stored as before v0.20.0, and refused every tick since.
+  const [listed] = await c.execute("INSERT INTO comments (card, user, content) VALUES (?,?,?)",
+    [card.insertId, owner.id, "Before the launch:\n\n- [ ] Write the post\n- [ ] Fix the form"]);
+  await reader.reload({ waitUntil: "networkidle" });
+  await reader.waitForTimeout(1500);
+  const box = reader.locator(`#comment-${listed.insertId} input[type="checkbox"]`).first();
+  const saved = reader.waitForResponse((r) => r.url().includes("/api/data/comment") && r.request().method() === "PATCH");
+  await box.click();
+  const answer = await saved;
+  const [[ticked]] = await c.query("SELECT content FROM comments WHERE id = ?", [listed.insertId]);
+  check("a box in somebody else's comment can be ticked", answer.status() === 200 && /- \[x\] Write the post/.test(ticked.content) && /- \[ \] Fix the form/.test(ticked.content),
+    `${answer.status()} ${JSON.stringify(ticked.content)}`);
 } catch (error) {
   console.error(`\n FAIL  the run stopped early — ${error.message.split("\n")[0]}`);
   failures++;

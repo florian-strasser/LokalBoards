@@ -35,7 +35,7 @@
 </template>
 
 <script setup lang="ts">
-import { Plus } from "lucide-vue-next";
+import { Plus } from "@lucide/vue";
 
 const languages = [
   { code: "EN", label: "Create new card" },

@@ -1,43 +1,10 @@
-import { defineEventHandler, getQuery } from "h3";
-import { setupDatabase } from "../../../app/lib/databaseSetup";
+export default dataHandler({
+  // A card's own history — who changed what, and when — to anybody who may
+  // see the card, and nobody else.
+  async GET({ db, query, cardOf }) {
+    const { card } = await cardOf(query.cardId, "read");
 
-// GET /api/data/card-activity?cardId=123
-// The card's own history — who changed what, and when. Requires read access to
-// the board the card belongs to, so a card's history is never visible to
-// someone who can't see the card.
-export default defineEventHandler(async (event) => {
-  if (event.req.method !== "GET") {
-    event.res.statusCode = 405;
-    return { error: "Method not allowed" };
-  }
-
-  const cardId = getQuery(event).cardId;
-  if (!cardId || isNaN(Number(cardId)) || Number(cardId) <= 0) {
-    event.res.statusCode = 400;
-    return { error: "Invalid card ID" };
-  }
-
-  const db = setupDatabase();
-
-  try {
-    // Resolve the card's board first, then run the normal access check on it.
-    const [[row]]: any = await db.query(
-      "SELECT a.board AS boardId FROM cards c JOIN areas a ON a.id = c.area WHERE c.id = ?",
-      [cardId],
-    );
-    if (!row) {
-      event.res.statusCode = 404;
-      return { error: "Resource not found" };
-    }
-
-    const auth = await requireBoardAccess(event, row.boardId, "read");
-    if (!auth.ok) {
-      event.res.statusCode = auth.status;
-      return { error: auth.error };
-    }
-
-    // Join the actor so the timeline can show an avatar, and resolve an
-    // assignee id in `data` to a name so the client doesn't have to.
+    // The actor joined, so the timeline can show an avatar.
     const [rows]: any = await db.execute(
       `SELECT ca.id, ca.type, ca.data, ca.createdAt,
               ca.actorId, u.name AS actorName, u.image AS actorImage, u.type AS actorType
@@ -45,7 +12,7 @@ export default defineEventHandler(async (event) => {
          LEFT JOIN \`user\` u ON u.id = ca.actorId
         WHERE ca.card = ?
         ORDER BY ca.createdAt ASC, ca.id ASC`,
-      [cardId],
+      [card.id],
     );
 
     const activity = rows.map((r: any) => {
@@ -67,7 +34,8 @@ export default defineEventHandler(async (event) => {
       };
     });
 
-    // Resolve assignee ids referenced in the payloads to display names.
+    // An entry about somebody put on or taken off the card carries their id;
+    // their name is looked up here, so the client does not have to.
     const assigneeIds = [
       ...new Set(
         activity
@@ -90,9 +58,5 @@ export default defineEventHandler(async (event) => {
     }
 
     return { activity };
-  } catch (error) {
-    logger.error("Card activity error:", error);
-    event.res.statusCode = 500;
-    return { error: "Internal server error" };
-  }
+  },
 });

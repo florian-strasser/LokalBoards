@@ -1,7 +1,9 @@
-# The Node every image runs, in the build and in the container itself. Keep it on
-# the newest 22.x: a Node security release reaches the people running this image
-# through this line or not at all.
-ARG NODE_VERSION=22.23.4
+# The Node the container runs. Keep it on the newest 22.x: a Node security
+# release reaches the people running this image through this line or not at
+# all. Only the runtime stage below uses it, from Node's own tarball, which is
+# out the day of a release — the build stage compiles with whatever 22 Docker
+# has, so a fix never waits on Docker Hub.
+ARG NODE_VERSION=22.23.5
 ARG MYSQL_VERSION=8.4
 
 # --- Build ---------------------------------------------------------------
@@ -11,7 +13,11 @@ ARG MYSQL_VERSION=8.4
 # emulating the amd64 esbuild on an arm64 host crashes it with random faults.
 # Nuxt's .output is portable JavaScript, so the runtime stage below can still
 # target a different architecture (e.g. linux/amd64) than the one we build on.
-FROM --platform=$BUILDPLATFORM node:${NODE_VERSION}-slim AS build
+#
+# Any 22 builds it: this Node only compiles, and never runs in the container.
+# Docker publishes the image for a Node release hours after Node does, and a
+# security release must not have to wait for it (see NODE_VERSION above).
+FROM --platform=$BUILDPLATFORM node:22-slim AS build
 
 WORKDIR /app
 

@@ -73,7 +73,7 @@
     </form>
 </template>
 <script setup lang="ts">
-import { Clipboard } from "lucide-vue-next";
+import { Clipboard } from "@lucide/vue";
 
 const nuxtApp = useNuxtApp();
 

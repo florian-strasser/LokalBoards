@@ -1,7 +1,10 @@
 import type { RowDataPacket } from "mysql2";
-import bcrypt from "bcryptjs";
-import { v4 as uuidv4 } from "uuid";
 import { runMigrations, setupDatabase } from "../../app/lib/databaseSetup";
+import {
+  createLocalUser,
+  isEmail,
+  isPasswordLongEnough,
+} from "../utils/password";
 import { startupStepDone } from "../utils/startup";
 
 // Seed the first administrator from the environment.
@@ -66,8 +69,7 @@ export default defineNitroPlugin(async () => {
       return;
     }
 
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
+    if (!isEmail(email)) {
       logger.error(
         "Admin bootstrap failed: NUXT_ADMIN_EMAIL is not a valid e-mail address",
       );
@@ -95,35 +97,18 @@ export default defineNitroPlugin(async () => {
 
     // Creating an account does need a password, held to the same minimum the
     // sign-up form enforces.
-    if (typeof password !== "string" || password.length < 8) {
+    if (!isPasswordLongEnough(password)) {
       logger.error(
         "Admin bootstrap failed: NUXT_ADMIN_PASSWORD must be at least 8 characters",
       );
       return;
     }
 
-    const userId = uuidv4();
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    const conn = await db.getConnection();
-    try {
-      await conn.beginTransaction();
-      await conn.execute(
-        "INSERT INTO `user` (`id`, `name`, `email`, `emailVerified`, `role`, `onboarded`) VALUES (?, ?, ?, ?, ?, ?)",
-        [userId, name, email, 1, "admin", 0],
-      );
-      // Keyed by the user's id, not the address, which can change (see sign-up.ts).
-      await conn.execute(
-        "INSERT INTO `account` (`id`, `accountId`, `providerId`, `userId`, `password`) VALUES (?, ?, ?, ?, ?)",
-        [uuidv4(), userId, "local", userId, hashedPassword],
-      );
-      await conn.commit();
-    } catch (error) {
-      await conn.rollback();
-      throw error;
-    } finally {
-      conn.release();
-    }
+    await createLocalUser(
+      db,
+      { name, email, emailVerified: 1, role: "admin", onboarded: 0 },
+      password,
+    );
 
     logger.info(`Admin bootstrap: created the first administrator ${email}`);
     logger.warn(

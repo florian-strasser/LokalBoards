@@ -18,7 +18,7 @@
     </div>
 </template>
 <script setup lang="ts">
-import { VenetianMask } from "lucide-vue-next";
+import { VenetianMask } from "@lucide/vue";
 
 const nuxtApp = useNuxtApp();
 const { data: session } = await useFetch("/api/auth/get-session");

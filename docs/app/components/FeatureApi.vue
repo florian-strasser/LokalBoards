@@ -22,5 +22,5 @@ curl <span class="ui-code__key">-X</span> POST \
 </template>
 
 <script setup lang="ts">
-import { Bot } from "lucide-vue-next";
+import { Bot } from "@lucide/vue";
 </script>

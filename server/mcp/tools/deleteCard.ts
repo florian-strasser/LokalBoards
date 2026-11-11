@@ -1,8 +1,6 @@
 import { defineMcpTool } from "@nuxtjs/mcp-toolkit/server";
 import { setupDatabase } from "../../../app/lib/databaseSetup";
-import { getServerSocket } from "../../utils/socket";
-import { removeCardData } from "../../utils/cardCleanup";
-import { dispatchWebhooks } from "../../utils/webhooks";
+import { archiveCard } from "../../utils/cards";
 import {
   requireUserId,
   requireWriteAccess,
@@ -15,12 +13,12 @@ const db = setupDatabase();
 
 export default defineMcpTool({
   name: "deleteCard",
-  title: "Delete a card",
+  title: "Archive a card",
   description:
-    "Permanently delete a card and its comments, attachments references and notifications. This cannot be undone. Needs edit access to the board.",
+    "Archive a card, as deleting one in the app does: it leaves the board with its comments, files and history, and can be restored from the board's archive, where it is deleted for good after the retention period. Needs edit access to the board.",
   annotations: {
     readOnlyHint: false,
-    destructiveHint: true,
+    destructiveHint: false,
     idempotentHint: true,
     openWorldHint: false,
   },
@@ -30,30 +28,8 @@ export default defineMcpTool({
     const userId = requireUserId();
     requireWriteAccess();
     const id = requireId(cardId, cardID, "cardId");
-    const { card, board } = await requireCard(id, userId, "edit");
-
-    // Everything that hangs off the card goes with it — its comments, files,
-    // labels, reminders, people and history — the same way the app removes a
-    // card for good. This used to take the comments, attachments and
-    // notifications only, and leave the rest behind.
-    await removeCardData(db, [id]);
-    await db.execute("DELETE FROM cards WHERE id = ?", [id]);
-
-    const serverSocket = getServerSocket();
-    if (serverSocket) {
-      serverSocket.to(`board-${board.id}`).emit("deletedCard", {
-        boardId: board.id,
-        card,
-      });
-    }
-
-    dispatchWebhooks({
-      boardId: board.id,
-      event: "card.deleted",
-      actorUserId: userId,
-      card: { id, name: card.name },
-    });
-
-    return jsonResult({ deleted: true, cardId: id });
+    // Into the archive, as in the app: an agent's mistake can be undone there.
+    await archiveCard(db, await requireCard(id, userId, "edit"), userId, true);
+    return jsonResult({ archived: true, cardId: id });
   },
 });

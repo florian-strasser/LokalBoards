@@ -1,9 +1,8 @@
 import { defineEventHandler, getQuery, readBody } from "h3";
-import { setupDatabase } from "../../../app/lib/databaseSetup";
+import { hashToken } from "../../utils/auth";
 import {
   CODE_LIFETIME_SECONDS,
   SCOPE_WRITE,
-  hashSecret,
   issuer,
   newSecret,
   normalizeScope,
@@ -132,128 +131,126 @@ function redirectWith(
   return url.toString();
 }
 
-export default defineEventHandler(async (event) => {
-  const method = event.req.method;
-
-  if (method === "GET") {
-    const checked = await check(getQuery(event));
-    if (!checked.ok) {
-      event.res.statusCode = checked.status;
-      return {
-        error: checked.error,
-        error_description: checked.description,
-        // The page needs to know whether it may offer to send the person back.
-        redirect: checked.redirectable
-          ? redirectWith(checked.redirectUri!, {
-              error: checked.error,
-              error_description: checked.description,
-              state: checked.state,
-            })
-          : null,
-      };
-    }
-
-    // Who is being asked. Not being signed in is not an error here — the page
-    // sends them to sign in and brings them back.
-    const session = await resolveSession(event);
-    const user = session.status === "ok" ? session.user : null;
-
-    // Something they have already agreed to, asking for no more than last time,
-    // does not ask again.
-    let alreadyAgreed = false;
-    if (user) {
-      const db = setupDatabase();
-      const [rows]: any = await db.execute(
-        "SELECT `scope` FROM `oauth_consents` WHERE `userId` = ? AND `clientId` = ?",
-        [user.id, checked.client.id],
-      );
-      const granted = String(rows[0]?.scope || "").split(/\s+/).filter(Boolean);
-      alreadyAgreed = checked.scope
-        .split(/\s+/)
-        .every((scope) => granted.includes(scope));
-    }
-
+const describeRequest = authHandler("GET", "anyone", async ({ event, db }) => {
+  const checked = await check(getQuery(event));
+  if (!checked.ok) {
+    event.res.statusCode = checked.status;
     return {
-      client: {
-        id: checked.client.id,
-        name: checked.client.name,
-        uri: checked.client.uri,
-        registration: checked.client.registration,
-      },
-      scope: checked.scope,
-      writes: checked.scope.includes(SCOPE_WRITE),
-      account: user ? { name: user.name, email: user.email } : null,
-      alreadyAgreed,
+      error: checked.error,
+      error_description: checked.description,
+      // The page needs to know whether it may offer to send the person back.
+      redirect: checked.redirectable
+        ? redirectWith(checked.redirectUri!, {
+            error: checked.error,
+            error_description: checked.description,
+            state: checked.state,
+          })
+        : null,
     };
   }
 
-  if (method === "POST") {
-    const body = await readBody(event).catch(() => ({}));
-    const checked = await check(body ?? {});
-    if (!checked.ok) {
-      event.res.statusCode = checked.status;
-      return { error: checked.error, error_description: checked.description };
-    }
+  // Who is being asked. Not being signed in is not an error here — the page
+  // sends them to sign in and brings them back.
+  const session = await resolveSession(event);
+  const user = session.status === "ok" ? session.user : null;
 
-    const session = await resolveSession(event);
-    if (session.status !== "ok") {
-      event.res.statusCode = 401;
-      return { error: "login_required" };
-    }
-    const user = session.user;
-
-    if (!(body as any)?.approve) {
-      return {
-        redirect: redirectWith(checked.redirectUri, {
-          error: "access_denied",
-          error_description: "The request was declined.",
-          state: checked.state,
-        }),
-      };
-    }
-
-    // What was asked for, narrowed by what was agreed to. Never widened: the
-    // consent screen can only take permissions away from the request.
-    const granted = (body as any)?.readOnly
-      ? checked.scope
-          .split(/\s+/)
-          .filter((scope) => scope !== SCOPE_WRITE)
-          .join(" ")
-      : checked.scope;
-
-    const db = setupDatabase();
-    const code = newSecret();
-    await db.execute(
-      "INSERT INTO `oauth_codes` (`codeHash`, `clientId`, `userId`, `redirectUri`, `scope`, `codeChallenge`, `resource`, `expiresAt`) " +
-        "VALUES (?, ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL ? SECOND))",
-      [
-        hashSecret(code),
-        checked.client.id,
-        user.id,
-        checked.redirectUri,
-        granted,
-        checked.codeChallenge,
-        checked.resource,
-        CODE_LIFETIME_SECONDS,
-      ],
+  // Something they have already agreed to, asking for no more than last time,
+  // does not ask again.
+  let alreadyAgreed = false;
+  if (user) {
+    const [rows]: any = await db.execute(
+      "SELECT `scope` FROM `oauth_consents` WHERE `userId` = ? AND `clientId` = ?",
+      [user.id, checked.client.id],
     );
+    const granted = String(rows[0]?.scope || "").split(/\s+/).filter(Boolean);
+    alreadyAgreed = checked.scope
+      .split(/\s+/)
+      .every((scope) => granted.includes(scope));
+  }
 
-    // Remembered so the next connection from the same client for the same
-    // scopes is one click instead of two.
-    await db.execute(
-      "INSERT INTO `oauth_consents` (`userId`, `clientId`, `scope`) VALUES (?, ?, ?) " +
-        "ON DUPLICATE KEY UPDATE `scope` = VALUES(`scope`), `createdAt` = NOW()",
-      [user.id, checked.client.id, granted],
-    );
+  return {
+    client: {
+      id: checked.client.id,
+      name: checked.client.name,
+      uri: checked.client.uri,
+      registration: checked.client.registration,
+    },
+    scope: checked.scope,
+    writes: checked.scope.includes(SCOPE_WRITE),
+    account: user ? { name: user.name, email: user.email } : null,
+    alreadyAgreed,
+  };
+});
 
+const answerRequest = authHandler("POST", "anyone", async ({ event, db }) => {
+  const body = await readBody(event).catch(() => ({}));
+  const checked = await check(body ?? {});
+  if (!checked.ok) {
+    event.res.statusCode = checked.status;
+    return { error: checked.error, error_description: checked.description };
+  }
+
+  // Checked here rather than by the frame, so a request that is wrong in
+  // itself says so before it asks anybody to sign in.
+  const session = await resolveSession(event);
+  if (session.status !== "ok") {
+    event.res.statusCode = 401;
+    return { error: "login_required" };
+  }
+  const user = session.user;
+
+  if (!(body as any)?.approve) {
     return {
       redirect: redirectWith(checked.redirectUri, {
-        code,
+        error: "access_denied",
+        error_description: "The request was declined.",
         state: checked.state,
       }),
     };
   }
 
-  event.res.statusCode = 405;
-  return { error: "invalid_request", error_description: "Method not allowed" };
+  // What was asked for, narrowed by what was agreed to. Never widened: the
+  // consent screen can only take permissions away from the request.
+  const granted = (body as any)?.readOnly
+    ? checked.scope
+        .split(/\s+/)
+        .filter((scope) => scope !== SCOPE_WRITE)
+        .join(" ")
+    : checked.scope;
+
+  const code = newSecret();
+  await db.execute(
+    "INSERT INTO `oauth_codes` (`codeHash`, `clientId`, `userId`, `redirectUri`, `scope`, `codeChallenge`, `resource`, `expiresAt`) " +
+      "VALUES (?, ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL ? SECOND))",
+    [
+      hashToken(code),
+      checked.client.id,
+      user.id,
+      checked.redirectUri,
+      granted,
+      checked.codeChallenge,
+      checked.resource,
+      CODE_LIFETIME_SECONDS,
+    ],
+  );
+
+  // Remembered so the next connection from the same client for the same
+  // scopes is one click instead of two.
+  await db.execute(
+    "INSERT INTO `oauth_consents` (`userId`, `clientId`, `scope`) VALUES (?, ?, ?) " +
+      "ON DUPLICATE KEY UPDATE `scope` = VALUES(`scope`), `createdAt` = NOW()",
+    [user.id, checked.client.id, granted],
+  );
+
+  return {
+    redirect: redirectWith(checked.redirectUri, {
+      code,
+      state: checked.state,
+    }),
+  };
 });
+
+// One frame per method; anything else gets the frame's 405.
+export default defineEventHandler((event) =>
+  event.method === "POST" ? answerRequest(event) : describeRequest(event),
+);

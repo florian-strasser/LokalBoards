@@ -132,7 +132,7 @@
 </template>
 
 <script setup lang="ts">
-import { ListFilter, UserRound, X } from "lucide-vue-next";
+import { ListFilter, UserRound, X } from "@lucide/vue";
 import { EMPTY_FILTER, UNASSIGNED, isFiltering } from "@/utils/boardFilter";
 
 defineProps({

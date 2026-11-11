@@ -109,7 +109,7 @@
 </template>
 
 <script setup lang="ts">
-import { Check } from "lucide-vue-next";
+import { Check } from "@lucide/vue";
 
 // The consent screen. Everything it shows comes from the server, which has
 // already decided whether the request is one it is willing to act on.

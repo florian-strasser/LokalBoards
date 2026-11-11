@@ -1,11 +1,10 @@
-import { defineEventHandler, readBody, setHeader } from "h3";
-import { setupDatabase } from "../../../app/lib/databaseSetup";
+import { readBody, setHeader } from "h3";
+import { hashToken } from "../../utils/auth";
+import { safeEqual } from "../../utils/sso";
 import {
-  hashSecret,
   issueTokens,
   resolveClient,
   resourceMatches,
-  secretsMatch,
   verifyPkce,
 } from "../../utils/oauth";
 
@@ -17,26 +16,22 @@ import {
 // PKCE exists to make safe. A client that registered with a secret may send it,
 // and then it is checked.
 
-const fail = (event: any, error: string, description?: string, status = 400) => {
+// An OAuth error: the code the client acts on, and a sentence for its logs.
+const oauthError = (event: any, error: string, description?: string, status = 400) => {
   event.res.statusCode = status;
   return { error, ...(description ? { error_description: description } : {}) };
 };
 
-export default defineEventHandler(async (event) => {
-  if (event.req.method !== "POST") {
-    return fail(event, "invalid_request", "Method not allowed", 405);
-  }
-
+export default authHandler("POST", "anyone", async ({ event, db }) => {
   // Token responses must never be cached: they carry credentials.
   setHeader(event, "cache-control", "no-store");
   setHeader(event, "pragma", "no-cache");
 
   const body: any = (await readBody(event).catch(() => null)) ?? {};
   const grantType = String(body.grant_type || "");
-  const db = setupDatabase();
 
   const client = await resolveClient(body.client_id);
-  if (!client) return fail(event, "invalid_client", "Unknown client.", 401);
+  if (!client) return oauthError(event, "invalid_client", "Unknown client.", 401);
 
   // A client that has a secret must prove it; one registered without stays a
   // public client and is held up by PKCE instead.
@@ -46,23 +41,23 @@ export default defineEventHandler(async (event) => {
       [client.id],
     );
     const expected = rows[0]?.secretHash;
-    const given = body.client_secret ? hashSecret(String(body.client_secret)) : "";
-    if (!expected || !given || !secretsMatch(expected, given)) {
-      return fail(event, "invalid_client", "Client authentication failed.", 401);
+    const given = body.client_secret ? hashToken(String(body.client_secret)) : "";
+    if (!expected || !given || !safeEqual(expected, given)) {
+      return oauthError(event, "invalid_client", "Client authentication failed.", 401);
     }
   }
 
   if (grantType === "authorization_code") {
     const code = String(body.code || "");
-    if (!code) return fail(event, "invalid_request", "A code is required.");
+    if (!code) return oauthError(event, "invalid_request", "A code is required.");
 
-    const codeHash = hashSecret(code);
+    const codeHash = hashToken(code);
     const [rows]: any = await db.execute(
       "SELECT * FROM `oauth_codes` WHERE `codeHash` = ? LIMIT 1",
       [codeHash],
     );
     const record = rows[0];
-    if (!record) return fail(event, "invalid_grant", "That code is not valid.");
+    if (!record) return oauthError(event, "invalid_grant", "That code is not valid.");
 
     // A code offered twice means either a client bug or somebody replaying a
     // stolen one. There is no way to tell them apart, so the safe reading wins:
@@ -72,7 +67,7 @@ export default defineEventHandler(async (event) => {
         "UPDATE `oauth_tokens` SET `revokedAt` = NOW() WHERE `clientId` = ? AND `userId` = ? AND `revokedAt` IS NULL",
         [record.clientId, record.userId],
       );
-      return fail(event, "invalid_grant", "That code has already been used.");
+      return oauthError(event, "invalid_grant", "That code has already been used.");
     }
 
     await db.execute("UPDATE `oauth_codes` SET `usedAt` = NOW() WHERE `codeHash` = ?", [
@@ -80,20 +75,20 @@ export default defineEventHandler(async (event) => {
     ]);
 
     if (new Date(record.expiresAt).getTime() < Date.now()) {
-      return fail(event, "invalid_grant", "That code has expired.");
+      return oauthError(event, "invalid_grant", "That code has expired.");
     }
     if (record.clientId !== client.id) {
-      return fail(event, "invalid_grant", "That code was issued to another client.");
+      return oauthError(event, "invalid_grant", "That code was issued to another client.");
     }
     // The redirect URI is part of what the code was bound to, and has to match.
     if (String(body.redirect_uri || "") !== record.redirectUri) {
-      return fail(event, "invalid_grant", "The redirect URI does not match the one the code was issued for.");
+      return oauthError(event, "invalid_grant", "The redirect URI does not match the one the code was issued for.");
     }
     if (!verifyPkce(String(body.code_verifier || ""), record.codeChallenge)) {
-      return fail(event, "invalid_grant", "The PKCE verifier does not match.");
+      return oauthError(event, "invalid_grant", "The PKCE verifier does not match.");
     }
     if (!resourceMatches(body.resource)) {
-      return fail(event, "invalid_target", "Tokens from this server are only valid for its own MCP endpoint.");
+      return oauthError(event, "invalid_target", "Tokens from this server are only valid for its own MCP endpoint.");
     }
 
     return await issueTokens(
@@ -106,25 +101,25 @@ export default defineEventHandler(async (event) => {
 
   if (grantType === "refresh_token") {
     const refresh = String(body.refresh_token || "");
-    if (!refresh) return fail(event, "invalid_request", "A refresh token is required.");
+    if (!refresh) return oauthError(event, "invalid_request", "A refresh token is required.");
 
     const [rows]: any = await db.execute(
       "SELECT * FROM `oauth_tokens` WHERE `refreshHash` = ? LIMIT 1",
-      [hashSecret(refresh)],
+      [hashToken(refresh)],
     );
     const record = rows[0];
-    if (!record) return fail(event, "invalid_grant", "That refresh token is not valid.");
+    if (!record) return oauthError(event, "invalid_grant", "That refresh token is not valid.");
     if (record.clientId !== client.id) {
-      return fail(event, "invalid_grant", "That refresh token belongs to another client.");
+      return oauthError(event, "invalid_grant", "That refresh token belongs to another client.");
     }
     if (record.revokedAt) {
-      return fail(event, "invalid_grant", "That refresh token has been revoked.");
+      return oauthError(event, "invalid_grant", "That refresh token has been revoked.");
     }
     if (
       record.refreshExpiresAt &&
       new Date(record.refreshExpiresAt).getTime() < Date.now()
     ) {
-      return fail(event, "invalid_grant", "That refresh token has expired.");
+      return oauthError(event, "invalid_grant", "That refresh token has expired.");
     }
 
     // Rotation: the old pair dies as the new one is born, so a refresh token
@@ -143,7 +138,7 @@ export default defineEventHandler(async (event) => {
     return await issueTokens(client.id, record.userId, scope, record.resource);
   }
 
-  return fail(
+  return oauthError(
     event,
     "unsupported_grant_type",
     "This server supports authorization_code and refresh_token.",

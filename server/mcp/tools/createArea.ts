@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { defineMcpTool } from "@nuxtjs/mcp-toolkit/server";
 import { setupDatabase } from "../../../app/lib/databaseSetup";
-import { getServerSocket } from "../../utils/socket";
+import { createArea } from "../../utils/areas";
 import {
   requireUserId,
   requireWriteAccess,
@@ -29,27 +29,7 @@ export default defineMcpTool({
     requireWriteAccess();
     const bid = requireId(boardId, boardID, "boardId");
     await requireBoard(bid, userId, "edit");
-
-    const [countRows]: any = await db.execute(
-      "SELECT COUNT(*) AS n FROM areas WHERE board = ?",
-      [bid],
-    );
-    const sort = (countRows[0]?.n ?? 0) + 1;
-
-    const [result]: any = await db.execute(
-      "INSERT INTO areas (board, name, sort) VALUES (?, ?, ?)",
-      [bid, name, sort],
-    );
-    const [rows]: any = await db.execute("SELECT * FROM areas WHERE id = ?", [
-      result.insertId,
-    ]);
-    const area = rows[0];
-
-    const serverSocket = getServerSocket();
-    if (serverSocket) {
-      serverSocket.to(`board-${bid}`).emit("addArea", { area, boardId: bid });
-    }
-
+    const area = await createArea(db, bid, name, true);
     return jsonResult({ area: serializeArea(area) });
   },
 });

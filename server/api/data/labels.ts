@@ -1,5 +1,4 @@
-import { defineEventHandler, getQuery, readBody } from "h3";
-import { setupDatabase } from "../../../app/lib/databaseSetup";
+import { readBody } from "h3";
 
 // The names a board is using.
 //
@@ -34,116 +33,59 @@ const PER_BOARD_MAX = 30;
 // `.label-pill` in `main.css`, in one place, in both themes.
 const LABEL_COLOR = "#0066cc";
 
-const loadBoard = async (db: any, boardId: unknown) => {
-  if (!boardId || isNaN(Number(boardId)) || Number(boardId) <= 0) return null;
-  const [rows]: any = await db.execute("SELECT * FROM boards WHERE id = ?", [
-    Number(boardId),
-  ]);
-  return rows[0] ?? null;
-};
+export default dataHandler({
+  async GET({ db, query, boardOf }) {
+    const { board } = await boardOf(query.boardId, "read");
+    const [rows]: any = await db.execute(
+      "SELECT `id`, `name` FROM `labels` WHERE `board` = ? ORDER BY `sort` ASC, `id` ASC",
+      [board.id],
+    );
+    return { labels: rows };
+  },
 
-export default defineEventHandler(async (event) => {
-  const method = event.req.method;
+  async POST({ event, db, boardOf }) {
+    const body = await readBody(event).catch(() => null);
+    if (!body || typeof body !== "object") fail(400, "Required fields are missing");
+    const { board } = await boardOf(body.boardId, "edit");
 
-  const auth = await resolveUserId(event);
-  if (!auth.ok) {
-    event.res.statusCode = auth.status;
-    return { error: auth.error };
-  }
-  const userId = auth.userId;
-  const db = setupDatabase();
+    const name = String(body.name ?? "").trim();
+    if (!name || name.length > NAME_MAX) fail(400, "Required fields are missing");
 
-  try {
-    if (method === "GET") {
-      const query = getQuery(event);
-      const board = await loadBoard(db, query.boardId);
-      if (!board) {
-        event.res.statusCode = 404;
-        return { error: "Resource not found" };
-      }
-      const decision = await authorizeBoard(db, board, userId, "read");
-      if (!decision.ok) {
-        event.res.statusCode = decision.status;
-        return { error: decision.error };
-      }
+    // Already in use on this board? Then that is the label, and this is not a
+    // new one. The comparison is MySQL's own under `utf8mb4_general_ci`, so
+    // "Bug" and "bug" are the same word — which is what somebody typing the
+    // second one means, and stops a board holding both.
+    const existing = await findByName(db, board.id, name);
+    if (existing) return { label: existing };
 
-      const [rows]: any = await db.execute(
-        "SELECT `id`, `name` FROM `labels` WHERE `board` = ? ORDER BY `sort` ASC, `id` ASC",
-        [board.id],
+    const [[counted]]: any = await db.execute(
+      "SELECT COUNT(*) AS total FROM `labels` WHERE `board` = ?",
+      [board.id],
+    );
+    if (Number(counted.total) >= PER_BOARD_MAX) fail(400, "TOO_MANY_LABELS");
+
+    const [[last]]: any = await db.execute(
+      "SELECT COALESCE(MAX(`sort`), -1) AS highest FROM `labels` WHERE `board` = ?",
+      [board.id],
+    );
+
+    try {
+      const [result]: any = await db.execute(
+        "INSERT INTO `labels` (`board`, `name`, `color`, `sort`) VALUES (?, ?, ?, ?)",
+        [board.id, name, LABEL_COLOR, Number(last.highest) + 1],
       );
-      return { labels: rows };
+      return { label: { id: result.insertId, name } };
+    } catch (error: any) {
+      // Somebody else typed the same word between the lookup above and this
+      // insert. The unique key is what stopped the board ending up with two,
+      // and theirs is now the label — so answer with it rather than failing a
+      // request that asked for exactly that.
+      if (error?.code !== "ER_DUP_ENTRY") throw error;
+      const raced = await findByName(db, board.id, name);
+      if (raced) return { label: raced };
+      throw error;
     }
-
-    if (method === "POST") {
-      const body = await readBody(event).catch(() => null);
-      if (!body || typeof body !== "object") {
-        event.res.statusCode = 400;
-        return { error: "Required fields are missing" };
-      }
-
-      const board = await loadBoard(db, (body as any).boardId);
-      if (!board) {
-        event.res.statusCode = 404;
-        return { error: "Resource not found" };
-      }
-      const decision = await authorizeBoard(db, board, userId, "edit");
-      if (!decision.ok) {
-        event.res.statusCode = decision.status;
-        return { error: decision.error };
-      }
-
-      const name = String((body as any).name ?? "").trim();
-      if (!name || name.length > NAME_MAX) {
-        event.res.statusCode = 400;
-        return { error: "Required fields are missing" };
-      }
-
-      // Already in use on this board? Then that is the label, and this is not a
-      // new one. The comparison is MySQL's own under `utf8mb4_general_ci`, so
-      // "Bug" and "bug" are the same word — which is what somebody typing the
-      // second one means, and stops a board holding both.
-      const existing = await findByName(db, board.id, name);
-      if (existing) return { label: existing };
-
-      const [[counted]]: any = await db.execute(
-        "SELECT COUNT(*) AS total FROM `labels` WHERE `board` = ?",
-        [board.id],
-      );
-      if (Number(counted.total) >= PER_BOARD_MAX) {
-        event.res.statusCode = 400;
-        return { error: "TOO_MANY_LABELS" };
-      }
-
-      const [[last]]: any = await db.execute(
-        "SELECT COALESCE(MAX(`sort`), -1) AS highest FROM `labels` WHERE `board` = ?",
-        [board.id],
-      );
-
-      try {
-        const [result]: any = await db.execute(
-          "INSERT INTO `labels` (`board`, `name`, `color`, `sort`) VALUES (?, ?, ?, ?)",
-          [board.id, name, LABEL_COLOR, Number(last.highest) + 1],
-        );
-        return { label: { id: result.insertId, name } };
-      } catch (error: any) {
-        // Somebody else typed the same word between the lookup above and this
-        // insert. The unique key is what stopped the board ending up with two,
-        // and theirs is now the label — so answer with it rather than failing a
-        // request that asked for exactly that.
-        if (error?.code !== "ER_DUP_ENTRY") throw error;
-        const raced = await findByName(db, board.id, name);
-        if (raced) return { label: raced };
-        throw error;
-      }
-    }
-
-    event.res.statusCode = 405;
-    return { error: "Method not allowed" };
-  } catch (error) {
-    logger.error("Database error:", error);
-    event.res.statusCode = 500;
-    return { error: "Internal server error" };
-  }
+  },
 });
 
 const findByName = async (db: any, boardId: number, name: string) => {

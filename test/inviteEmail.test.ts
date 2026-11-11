@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { getBoardInviteEmail } from "../server/utils/translations";
+import { getBoardInviteEmail } from "../server/utils/emails";
 
 describe("getBoardInviteEmail", () => {
   it("links the board and describes read & write access", () => {

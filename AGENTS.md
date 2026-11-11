@@ -111,8 +111,17 @@ kick off a run. Otherwise, run on a schedule (e.g. hourly).
 `done`, `assigneeId`, `unassigned`, `dueBefore` and `limit` all combine.
 
 `listBoardMembers` returns userId, name, type and role — not e-mail addresses.
-`moveCard` moves a card between areas of **its own board**; a `toAreaId` on a
-different board is rejected.
+`moveCard` moves a card to any area you can edit, on its own board or on
+another one.
+
+**The delete tools archive**, as deleting does in the app: `deleteBoard`,
+`deleteArea` and `deleteCard` take the thing off the board and answer
+`archived: true`. It keeps everything it had and can be restored from the
+board's archive, until the instance's retention period deletes it for good.
+
+An agent's changes are the same changes as a person's: they go in the card's
+history, the people on the board are notified, and the REST API does exactly
+the same — both call one implementation of each operation.
 
 ## Agent accounts
 

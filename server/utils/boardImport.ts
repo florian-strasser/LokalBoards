@@ -56,7 +56,7 @@ export interface ImportBoard {
 
 // The limits a board here has anyway, and a guard against a pathological file.
 export const MAX_AREAS = 500;
-export const MAX_CARDS = 5000;
+const MAX_CARDS = 5000;
 const MAX_LABELS = 30;
 const LABEL_MAX = 64;
 const NAME_MAX = 255;

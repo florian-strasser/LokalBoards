@@ -114,29 +114,3 @@ export async function unlinkOrphanedFiles(
   }
   return removed;
 }
-
-// The cards in an area, or in a whole board — so a deletion higher up can clear
-// everything beneath it.
-export async function cardIdsInAreas(
-  db: any,
-  areaIds: number[],
-): Promise<number[]> {
-  const ids = areaIds.map(Number).filter((id) => Number.isInteger(id) && id > 0);
-  if (!ids.length) return [];
-  const [rows]: any = await db.execute(
-    `SELECT id FROM cards WHERE area IN (${ids.map(() => "?").join(",")})`,
-    ids,
-  );
-  return rows.map((row: any) => Number(row.id));
-}
-
-export async function cardIdsInBoard(
-  db: any,
-  boardId: number | string,
-): Promise<number[]> {
-  const [rows]: any = await db.execute(
-    "SELECT c.id FROM cards c JOIN areas a ON c.area = a.id WHERE a.board = ?",
-    [boardId],
-  );
-  return rows.map((row: any) => Number(row.id));
-}

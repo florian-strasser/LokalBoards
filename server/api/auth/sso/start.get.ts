@@ -1,13 +1,7 @@
 import { secureCookiesFor } from "../../../utils/secureCookies";
 import { sendRedirect, setCookie } from "h3";
-import { findProvider } from "../../../utils/ssoProviders";
-import {
-  pkceChallenge,
-  randomToken,
-  readSsoConfig,
-  resolveEndpoints,
-  ssoIsUsable,
-} from "../../../utils/sso";
+import { requestedProvider } from "../../../utils/ssoProviders";
+import { pkceChallenge, randomToken, resolveEndpoints } from "../../../utils/sso";
 
 // Step one of the sign-in: hand the browser to the provider.
 //
@@ -25,17 +19,16 @@ import {
 // `httpOnly` so no script can read them, `sameSite: lax` because the provider
 // redirects back with a GET and a stricter setting would drop them exactly then.
 export default defineEventHandler(async (event) => {
-  const requested = String(getQuery(event).provider || "");
-  const provider = requested ? findProvider(requested, event) : null;
-  if (requested && (!provider || provider.kind !== "oidc")) {
+  const provider = requestedProvider(
+    "oidc",
+    String(getQuery(event).provider || ""),
+    event,
+  );
+  if (!provider) {
     event.res.statusCode = 404;
     return { error: "sso_not_configured" };
   }
-  const config: any = (provider?.config as any) ?? readSsoConfig(event);
-  if (!ssoIsUsable(config)) {
-    event.res.statusCode = 404;
-    return { error: "sso_not_configured" };
-  }
+  const { config } = provider;
 
   try {
     const endpoints = await resolveEndpoints(config);
@@ -55,7 +48,7 @@ export default defineEventHandler(async (event) => {
     setCookie(event, "sso_verifier", verifier, cookie);
     // Which provider this attempt belongs to, so the callback verifies the
     // token against the right issuer and client.
-    setCookie(event, "sso_provider", provider?.id ?? "sso", cookie);
+    setCookie(event, "sso_provider", provider.id, cookie);
 
     const url = new URL(endpoints.authorizationUrl);
     url.searchParams.set("response_type", "code");

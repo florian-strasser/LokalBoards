@@ -1,9 +1,10 @@
 import { defineMcpTool } from "@nuxtjs/mcp-toolkit/server";
 import { setupDatabase } from "../../../app/lib/databaseSetup";
-import { getServerSocket } from "../../utils/socket";
+import { emitToBoard } from "../../utils/socket";
+import { cardForBoard } from "../../utils/cards";
 import { dispatchWebhooks } from "../../utils/webhooks";
 import { recordCardActivity } from "../../utils/cardActivity";
-import { attachAssignees, claimCardFor } from "../../utils/cardAssignees";
+import { claimCardFor } from "../../utils/cardAssignees";
 import {
   requireUserId,
   requireWriteAccess,
@@ -38,20 +39,10 @@ export default defineMcpTool({
     // free. Only a card that was free changes hands; re-claiming your own is a
     // no-op and must not re-broadcast or re-fire webhooks.
     const { claimed, wasFree } = await claimCardFor(db, id, userId);
-    const [rows]: any = await db.execute("SELECT * FROM cards WHERE id = ?", [
-      id,
-    ]);
-    const [card] = await attachAssignees(db, rows);
+    const card = await cardForBoard(db, id);
 
     if (claimed && wasFree) {
-      const serverSocket = getServerSocket();
-      if (serverSocket) {
-        serverSocket.to(`board-${board.id}`).emit("updateCard", {
-          boardId: board.id,
-          attachments: [],
-          card: { ...card, status: !!card.status },
-        });
-      }
+      emitToBoard(board.id, "updateCard", { boardId: board.id, attachments: [], card });
       await recordCardActivity(id, "assigned", userId, { assigneeId: userId });
       dispatchWebhooks({
         boardId: board.id,

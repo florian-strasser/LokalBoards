@@ -123,7 +123,7 @@
     </div>
 </template>
 <script setup lang="ts">
-import { Search } from "lucide-vue-next";
+import { Search } from "@lucide/vue";
 
 const nuxtApp = useNuxtApp();
 

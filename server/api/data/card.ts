@@ -1,741 +1,112 @@
-import { defineEventHandler, readBody, getQuery } from "h3";
-import { setupDatabase } from "../../../app/lib/databaseSetup";
-import { pruneUnusedLabels } from "../../utils/labelCleanup";
-import { dispatchWebhooks } from "../../utils/webhooks";
-import { getServerSocket } from "../../utils/socket";
-import { nextCardSort } from "../../utils/cardPositions";
-import { isRepeatEvery, repeatAfterEdit } from "../../utils/repeat";
-import {
-  assigneeIdsFrom,
-  attachAssignees,
-  setCardAssignees,
-} from "../../utils/cardAssignees";
+import { readBody } from "h3";
+import { assigneeIdsFrom } from "../../utils/cardAssignees";
+import { archiveCard, cardForBoard, createCard, updateCard } from "../../utils/cards";
+import { isRepeatEvery } from "../../utils/repeat";
 
-// Function to handle file uploads
-async function handleFileUpload(db, cardID, file) {
-  const { filename, filetype, filesize, filedata } = file;
+// A card's files as the app shows them.
+const ATTACHMENT_COLUMNS = "id, filename, filetype, filesize, filedata";
 
-  // Insert the file into the attachments table
-  const [result] = await db.execute(
-    "INSERT INTO attachments (card, filename, filetype, filesize, filedata) VALUES (?, ?, ?, ?, ?)",
-    [cardID, filename, filetype, filesize, filedata],
-  );
-
-  return result.insertId;
+// A date from the request, or a 400 for one that is not a date.
+function dateFrom(value: unknown): Date | null {
+  if (!value) return null;
+  const date = new Date(value as string);
+  if (Number.isNaN(date.getTime())) fail(400, "Invalid due date");
+  return date;
 }
 
-export default defineEventHandler(async (event) => {
-  // Check the HTTP method
-  const method = event.req.method;
-
-  // Resolve the authenticated user (API key or session).
-  const auth = await resolveUserId(event);
-  if (!auth.ok) {
-    event.res.statusCode = auth.status;
-    return { error: auth.error };
-  }
-  const userId = auth.userId;
-
-  try {
-    // Initialize database
-    const db = setupDatabase();
-
-    if (method === "GET") {
-      // Handle GET request to fetch card details
-      const { cardID } = getQuery(event);
-
-      // HIGH FIX: Validate cardId is a positive integer
-      const cardId = Array.isArray(cardID) ? cardID[0] : cardID;
-      if (!cardId || isNaN(Number(cardId)) || Number(cardId) <= 0) {
-        event.res.statusCode = 400;
-        return { error: "Invalid card ID" };
-      }
-
-      // Fetch card details
-      const [rows] = await db.execute("SELECT * FROM cards WHERE id = ?", [
-        cardId,
-      ]);
-      const card = rows[0];
-
-      if (!card) {
-        // HIGH FIX: Generic error to prevent card enumeration
-        event.res.statusCode = 404;
-        return { error: "Resource not found" };
-      }
-
-      const [boardRows] = await db.execute(
-        "SELECT b.* FROM boards b JOIN areas a ON b.id = a.board WHERE a.id = ?",
-        [card.area],
-      );
-      const board = boardRows[0];
-
-      if (!board) {
-        // HIGH FIX: Generic error to prevent board enumeration
-        event.res.statusCode = 404;
-        return { error: "Resource not found" };
-      }
-
-      const decision = await authorizeBoard(db, board, userId, "read");
-      if (!decision.ok) {
-        event.res.statusCode = decision.status;
-        return { error: decision.error };
-      }
-      {
-        // Convert status from number to boolean
-        card.status = !!card.status;
-
-        // Fetch attachments for the card
-        const [attachmentRows] = await db.execute(
-          "SELECT id, filename, filetype, filesize, filedata FROM attachments WHERE card = ?",
-          [cardId],
-        );
-        const attachments = attachmentRows.map((row) => ({
-          id: row.id,
-          filename: row.filename,
-          filetype: row.filetype,
-          filesize: row.filesize,
-          filedata: row.filedata,
-        }));
-
-        // Reminder schedule (minutes-before-due offsets).
-        const [reminderRows]: any = await db.execute(
-          "SELECT minutesBefore FROM card_reminders WHERE card = ? ORDER BY minutesBefore ASC",
-          [cardId],
-        );
-        card.reminders = (reminderRows as any[]).map((r) => r.minutesBefore);
-
-        // The labels themselves, not just their ids: they are what the card
-        // shows and what it hands back to the tile behind it.
-        const [labelRows]: any = await db.execute(
-          `SELECT l.id, l.name
-             FROM \`card_labels\` cl JOIN \`labels\` l ON l.id = cl.label
-            WHERE cl.card = ? ORDER BY l.sort ASC, l.id ASC`,
-          [cardId],
-        );
-        card.labels = labelRows;
-        Object.assign(card, (await attachAssignees(db, [card]))[0]);
-
-        return { card, attachments };
-      }
-    } else if (method === "POST") {
-      // Handle POST request to create a new card
-      const { areaId, name, content, status } = await readBody(event);
-
-      // HIGH FIX: Validate required fields with generic message
-      if (!areaId || !name) {
-        event.res.statusCode = 400;
-        return { error: "Required fields are missing" };
-      }
-
-      // HIGH FIX: Validate areaId is a positive integer
-      if (isNaN(Number(areaId)) || Number(areaId) <= 0) {
-        event.res.statusCode = 400;
-        return { error: "Invalid area ID" };
-      }
-
-      const [boardRows] = await db.execute(
-        "SELECT b.* FROM boards b JOIN areas a ON b.id = a.board WHERE a.id = ?",
-        [areaId],
-      );
-      const board = boardRows[0];
-
-      if (!board) {
-        // HIGH FIX: Generic error to prevent board enumeration
-        event.res.statusCode = 404;
-        return { error: "Resource not found" };
-      }
-
-      const writeDecision = await authorizeBoard(db, board, userId, "edit");
-      if (!writeDecision.ok) {
-        event.res.statusCode = writeDecision.status;
-        return { error: writeDecision.error };
-      }
-      {
-        // At the bottom of the column: after the highest number in it, not
-        // after however many cards it has (see `cardPositions`).
-        const sort = await nextCardSort(db, Number(areaId));
-
-        // Create new card
-        const [result] = await db.execute(
-          "INSERT INTO cards (area, name, content, status, sort) VALUES (?, ?, ?, ?, ?)",
-          [areaId, name, content || "", status ? 1 : 0, sort],
-        );
-
-        const [rows] = await db.execute("SELECT * FROM cards WHERE id = ?", [
-          result.insertId,
-        ]);
-        // Nobody is on a new card yet; saying so in the same shape as every
-        // other card keeps the board from having to guess.
-        const card = Object.assign(rows[0], (await attachAssignees(db, [rows[0]]))[0]);
-
-        // Fetch all users who have access to the board (owner and invited users)
-        const [boardRows] = await db.execute(
-          "SELECT user, id AS boardId, name FROM boards WHERE id = (SELECT board FROM areas WHERE id = ?)",
-          [areaId],
-        );
-        const boardOwner = boardRows[0]?.user;
-        const boardId = boardRows[0]?.boardId;
-
-        const [invitedUsers] = await db.execute(
-          "SELECT user FROM invitations WHERE board = (SELECT board FROM areas WHERE id = ?)",
-          [areaId],
-        );
-
-        // Create notifications for the board owner and invited users
-        // CRITICAL FIX: Use authenticated userId instead of body user
-        const usersToNotify = [
-          boardOwner,
-          ...invitedUsers.map((inv) => inv.user),
-        ].filter(Boolean);
-
-        // Get the creating user's name and board name for the notification
-        const [userRows]: any = await db.execute(
-          "SELECT name FROM user WHERE id = ?",
-          [userId],
-        );
-        const username = userRows[0]?.name || "Unknown user";
-
-        const boardName = boardRows[0]?.name || "Unknown board";
-
-        for (const notifyUserId of usersToNotify) {
-          if (notifyUserId !== userId) {
-            // Don't notify the authenticated user who created the card
-            await db.execute(
-              "INSERT INTO notifications (userId, type, boardId, cardId, message, actorId) VALUES (?, ?, ?, ?, ?, ?)",
-              [
-                notifyUserId,
-                "card_created",
-                boardId,
-                card.id,
-                `"${username}" created a new card "${card.name}" on board "${boardName}"`,
-                              userId,
-              ],
-            );
-          }
-        }
-
-        await recordCardActivity(card.id, "created", userId);
-
-        // Emit socket event for card creation (only for API calls, not frontend)
-        if (auth.viaApiKey) {
-          const serverSocket = getServerSocket();
-          serverSocket.to(`board-${boardRows[0]?.boardId}`).emit("addCard", {
-            boardId: boardRows[0]?.boardId,
-            card: rows[0],
-          });
-        }
-
-        dispatchWebhooks({
-          boardId: boardRows[0]?.boardId,
-          event: "card.created",
-          actorUserId: userId,
-          card: { id: card?.id, name: card?.name, areaId: card?.area },
-        });
-
-        return { card };
-      }
-    } else if (method === "PUT") {
-      // Handle PUT request to update an existing card
-      const body = await readBody(event);
-      const { cardID, name, content, status, files, dueDate, reminders, labelIds, repeatEvery } =
-        body;
-
-      // Who is on the card: `assignees` replaces the whole set; the older
-      // single `assignee` still works and replaces it with that one person, or
-      // with nobody. Sending neither leaves the people alone, the same as
-      // `labelIds` and `reminders`.
-      const wantedAssignees: string[] | null = Array.isArray(body?.assignees)
-        ? assigneeIdsFrom(body.assignees)
-        : body && "assignee" in body
-          ? assigneeIdsFrom(body.assignee ? [body.assignee] : [])
-          : null;
-
-      // Absent leaves the rhythm alone, empty stops it; anything else has to be
-      // one of the rhythms there are.
-      if (
-        repeatEvery !== undefined &&
-        repeatEvery !== null &&
-        repeatEvery !== "" &&
-        !isRepeatEvery(repeatEvery)
-      ) {
-        event.res.statusCode = 400;
-        return { error: "Invalid repeat value" };
-      }
-
-      // HIGH FIX: Validate required fields with generic message
-      if (!cardID || !name) {
-        event.res.statusCode = 400;
-        return { error: "Required fields are missing" };
-      }
-
-      // HIGH FIX: Validate cardID is a positive integer
-      if (isNaN(Number(cardID)) || Number(cardID) <= 0) {
-        event.res.statusCode = 400;
-        return { error: "Invalid card ID" };
-      }
-
-      // Fetch card details
-      const [rows] = await db.execute("SELECT * FROM cards WHERE id = ?", [
-        cardID,
-      ]);
-      const card = rows[0];
-
-      if (!card) {
-        // HIGH FIX: Generic error to prevent card enumeration
-        event.res.statusCode = 404;
-        return { error: "Resource not found" };
-      }
-
-      const [boardRows] = await db.execute(
-        "SELECT b.* FROM boards b JOIN areas a ON b.id = a.board WHERE a.id = ?",
-        [card.area],
-      );
-      const board = boardRows[0];
-
-      if (!board) {
-        // HIGH FIX: Generic error to prevent board enumeration
-        event.res.statusCode = 404;
-        return { error: "Resource not found" };
-      }
-
-      const writeDecision = await authorizeBoard(db, board, userId, "edit");
-      if (!writeDecision.ok) {
-        event.res.statusCode = writeDecision.status;
-        return { error: writeDecision.error };
-      }
-      {
-        // Fetch the original card to check if status changed
-        const [originalCardRows] = await db.execute(
-          "SELECT * FROM cards WHERE id = ?",
-          [cardID],
-        );
-        const originalCard = originalCardRows[0];
-        const originalStatus = !!originalCard.status;
-        const newStatus = !!status;
-
-        // Normalize the new due date.
-        const newDue = dueDate ? new Date(dueDate) : null;
-        const oldDue = originalCard.dueDate
-          ? new Date(originalCard.dueDate)
-          : null;
-        const dueChanged =
-          (newDue ? newDue.getTime() : null) !==
-          (oldDue ? oldDue.getTime() : null);
-        const repeat = repeatAfterEdit(
-          originalCard,
-          repeatEvery,
-          newDue,
-          dueChanged,
-        );
-
-        // Update the card
-        await db.execute(
-          "UPDATE cards SET name = ?, content = ?, status = ?, dueDate = ?, repeatEvery = ?, repeatAnchor = ?, repeatArea = ?, repeatNext = ? WHERE id = ?",
-          [
-            name,
-            content || "",
-            status ? 1 : 0,
-            newDue,
-            repeat.repeatEvery,
-            repeat.repeatAnchor,
-            repeat.repeatArea,
-            repeat.repeatNext,
-            cardID,
-          ],
-        );
-        if (repeat.repeatEvery !== (originalCard.repeatEvery || null)) {
-          await recordCardActivity(cardID, "repeat", userId, {
-            every: repeat.repeatEvery,
-          });
-        }
-
-        // Sync the reminder schedule when the client provided one, preserving
-        // the `notified` flag of reminders that stay unchanged.
-        if (Array.isArray(reminders)) {
-          const wanted = [
-            ...new Set(
-              reminders
-                .map((m: any) => Number(m))
-                .filter((m: number) => Number.isFinite(m) && m >= 0),
-            ),
-          ];
-          const [existingRem]: any = await db.execute(
-            "SELECT minutesBefore FROM card_reminders WHERE card = ?",
-            [cardID],
-          );
-          const existing = new Set(
-            (existingRem as any[]).map((r) => r.minutesBefore),
-          );
-          for (const m of existing) {
-            if (!wanted.includes(m)) {
-              await db.execute(
-                "DELETE FROM card_reminders WHERE card = ? AND minutesBefore = ?",
-                [cardID, m],
-              );
-            }
-          }
-          for (const m of wanted) {
-            if (!existing.has(m)) {
-              await db.execute(
-                "INSERT INTO card_reminders (card, minutesBefore, notified) VALUES (?, ?, 0)",
-                [cardID, m],
-              );
-            }
-          }
-        }
-
-        // Which labels this card wears, when the client says. Absent means
-        // "leave them alone" — the same contract as `reminders` above, so a
-        // caller that knows nothing about labels cannot strip them by omission.
-        //
-        // Only labels belonging to this card's own board are accepted, so a
-        // card cannot be made to wear another board's names by id.
-        if (Array.isArray(labelIds)) {
-          const wanted = [
-            ...new Set(
-              labelIds
-                .map((id: any) => Number(id))
-                .filter((id: number) => Number.isFinite(id) && id > 0),
-            ),
-          ];
-
-          // Names are collected alongside the ids because the history is
-          // written from them, and a word that is about to be swept would be
-          // gone by the time the entry was written.
-          const nameById = new Map<number, string>();
-          const allowed: number[] = [];
-          if (wanted.length > 0) {
-            const placeholders = wanted.map(() => "?").join(",");
-            const [ownRows]: any = await db.execute(
-              `SELECT \`id\`, \`name\` FROM \`labels\` WHERE board = ? AND id IN (${placeholders})`,
-              [board.id, ...wanted],
-            );
-            for (const row of ownRows as any[]) {
-              allowed.push(Number(row.id));
-              nameById.set(Number(row.id), String(row.name));
-            }
-          }
-
-          // What it wore before, so anything it is putting down can be swept
-          // if no other card picked it up. A label exists because a card uses
-          // it; the last card to drop a name takes the name with it, and the
-          // next card to type that word makes it again.
-          const [wornRows]: any = await db.execute(
-            "SELECT l.`id`, l.`name` FROM `card_labels` cl JOIN `labels` l ON l.id = cl.label WHERE cl.`card` = ?",
-            [cardID],
-          );
-          const before: number[] = [];
-          for (const row of wornRows as any[]) {
-            before.push(Number(row.id));
-            nameById.set(Number(row.id), String(row.name));
-          }
-
-          await db.execute("DELETE FROM `card_labels` WHERE `card` = ?", [
-            cardID,
-          ]);
-          for (const labelId of allowed) {
-            await db.execute(
-              "INSERT INTO `card_labels` (`card`, `label`) VALUES (?, ?)",
-              [cardID, labelId],
-            );
-          }
-
-          // Labelling a card is a change to it, so it belongs in the card's own
-          // history beside the due date and the assignee. Not in the
-          // notifications: nobody needs telling by e-mail that a card is now
-          // marked "Bug", and the history is where you look to find out.
-          const added = allowed.filter((id) => !before.includes(id));
-          const removed = before.filter((id) => !allowed.includes(id));
-          if (added.length || removed.length) {
-            const named = (ids: number[]) =>
-              ids.map((id) => nameById.get(id)).filter(Boolean);
-            await recordCardActivity(cardID, "labels", userId, {
-              added: named(added),
-              removed: named(removed),
-            });
-          }
-
-          await pruneUnusedLabels(db, removed);
-        }
-
-        // A changed due date means the reminders should fire again.
-        if (dueChanged) {
-          await recordCardActivity(cardID, "due", userId, {
-            dueDate: dueDate || null,
-          });
-          await db.execute(
-            "UPDATE card_reminders SET notified = 0 WHERE card = ?",
-            [cardID],
-          );
-        }
-
-        // Who came on and who went off. Both go in the card's history; the
-        // people put on it by somebody else are told, and nobody is told that
-        // they put themselves on a card.
-        if (wantedAssignees !== null) {
-          const change = await setCardAssignees(
-            db,
-            Number(cardID),
-            board.id,
-            wantedAssignees,
-          );
-          const [assignerRows]: any = change.added.length
-            ? await db.execute("SELECT name FROM user WHERE id = ?", [userId])
-            : [[]];
-          const assignerName = assignerRows[0]?.name || "Someone";
-          for (const assigneeId of change.added) {
-            await recordCardActivity(cardID, "assigned", userId, {
-              assigneeId,
-            });
-            if (assigneeId === userId) continue;
-            await db.execute(
-              "INSERT INTO notifications (userId, type, boardId, cardId, message, actorId) VALUES (?, ?, ?, ?, ?, ?)",
-              [
-                assigneeId,
-                "card_assigned",
-                board.id,
-                cardID,
-                `"${assignerName}" assigned you the card "${name}"`,
-                userId,
-              ],
-            );
-          }
-          for (const assigneeId of change.removed) {
-            await recordCardActivity(cardID, "assigned", userId, {
-              assigneeId,
-              removed: true,
-            });
-          }
-        }
-
-        // Handle file uploads if present
-        let newAttachments = [];
-        if (files && Array.isArray(files)) {
-          for (const file of files) {
-            const attachmentId = await handleFileUpload(db, cardID, file);
-            newAttachments.push(attachmentId);
-          }
-        }
-
-        // Fetch the updated card with comment and attachment counts
-        const [rows] = await db.execute(
-          "SELECT c.*, (SELECT COUNT(*) FROM comments co WHERE co.card = c.id) as commentCount, (SELECT COUNT(*) FROM attachments a WHERE a.card = c.id) as attachmentCount FROM cards c WHERE c.id = ?",
-          [cardID],
-        );
-        const card = rows[0];
-
-        if (!card) {
-          // HIGH FIX: Generic error to prevent card enumeration
-          event.res.statusCode = 404;
-          return { error: "Resource not found" };
-        }
-
-        // Convert status from number to boolean
-        card.status = !!card.status;
-
-        // Attach the reminder schedule to the returned card.
-        const [cardReminderRows]: any = await db.execute(
-          "SELECT minutesBefore FROM card_reminders WHERE card = ? ORDER BY minutesBefore ASC",
-          [cardID],
-        );
-        card.reminders = (cardReminderRows as any[]).map((r) => r.minutesBefore);
-
-        // Create notification if status changed
-        if (originalStatus !== newStatus) {
-          // Fetch all users who have access to the board (owner and invited users)
-          const [boardRows] = await db.execute(
-            "SELECT user, id AS boardId FROM boards WHERE id = (SELECT board FROM areas WHERE id = ?)",
-            [card.area],
-          );
-          const boardOwner = boardRows[0]?.user;
-          const boardId = boardRows[0]?.boardId;
-
-          const [invitedUsers] = await db.execute(
-            "SELECT user FROM invitations WHERE board = (SELECT board FROM areas WHERE id = ?)",
-            [card.area],
-          );
-
-          // Create notifications for the board owner and invited users
-          const usersToNotify = [
-            boardOwner,
-            ...invitedUsers.map((inv) => inv.user),
-          ].filter(Boolean);
-
-          await recordCardActivity(cardID, "status", userId, {
-            done: !!newStatus,
-          });
-          const statusText = newStatus ? "completed" : "reopened";
-          const notificationMessage = `Card "${card.name}" status changed to ${statusText}`;
-
-          for (const notifyUserId of usersToNotify) {
-            if (notifyUserId !== userId) {
-              // Don't notify the user who changed the status
-              await db.execute(
-                "INSERT INTO notifications (userId, type, boardId, cardId, message, actorId) VALUES (?, ?, ?, ?, ?, ?)",
-                [
-                  notifyUserId,
-                  "card_status_changed",
-                  boardId,
-                  card.id,
-                  notificationMessage,
-                                userId,
-              ],
-              );
-            }
-          }
-        }
-
-        // Fetch the new attachments if any were added
-        let attachments = [];
-        if (newAttachments.length > 0) {
-          const [attachmentRows] = await db.execute(
-            "SELECT id, filename, filetype, filesize, filedata FROM attachments WHERE id IN (?)",
-            [newAttachments.join(",")],
-          );
-          attachments = attachmentRows.map((row) => ({
-            id: row.id,
-            filename: row.filename,
-            filetype: row.filetype,
-            filesize: row.filesize,
-            filedata: row.filedata,
-          }));
-        }
-
-        // The labels it wears now. The answer carries them, and so does the
-        // broadcast built from it, so another client showing this card is
-        // told what changed rather than left with what it had.
-        const [currentLabels]: any = await db.execute(
-          `SELECT l.id, l.name
-             FROM \`card_labels\` cl JOIN \`labels\` l ON l.id = cl.label
-            WHERE cl.card = ? ORDER BY l.sort ASC, l.id ASC`,
-          [cardID],
-        );
-        card.labels = currentLabels;
-        // Who is on it now — the same object is what the broadcast below
-        // sends, so other boards learn it too.
-        Object.assign(card, (await attachAssignees(db, [card]))[0]);
-
-        // Emit socket event for card update (only for API calls, not frontend)
-        if (auth.viaApiKey) {
-          const serverSocket = getServerSocket();
-          serverSocket.to(`board-${boardRows[0]?.boardId}`).emit("updateCard", {
-            boardId: boardRows[0]?.boardId,
-            attachments: attachments,
-            card: rows[0],
-          });
-        }
-
-        dispatchWebhooks({
-          boardId: board?.id,
-          event: "card.updated",
-          actorUserId: userId,
-          card: { id: card?.id, name: card?.name, done: !!card?.status },
-        });
-
-        return { card, attachments };
-      }
-    } else if (method === "DELETE") {
-      // Handle DELETE request: archives the card, or removes it for good when
-      // the caller asks for that explicitly.
-      const { cardID, permanent } = await readBody(event);
-
-      // HIGH FIX: Validate cardID is a positive integer
-      if (!cardID || isNaN(Number(cardID)) || Number(cardID) <= 0) {
-        event.res.statusCode = 400;
-        return { error: "Invalid card ID" };
-      }
-
-      // Fetch card details
-      const [rows] = await db.execute("SELECT * FROM cards WHERE id = ?", [
-        cardID,
-      ]);
-      const card = rows[0];
-
-      if (!card) {
-        // HIGH FIX: Generic error to prevent card enumeration
-        event.res.statusCode = 404;
-        return { error: "Resource not found" };
-      }
-
-      const [boardRows] = await db.execute(
-        "SELECT b.* FROM boards b JOIN areas a ON b.id = a.board WHERE a.id = ?",
-        [card.area],
-      );
-      const board = boardRows[0];
-
-      if (!board) {
-        // HIGH FIX: Generic error to prevent board enumeration
-        event.res.statusCode = 404;
-        return { error: "Resource not found" };
-      }
-
-      const writeDecision = await authorizeBoard(db, board, userId, "edit");
-      if (!writeDecision.ok) {
-        event.res.statusCode = writeDecision.status;
-        return { error: writeDecision.error };
-      }
-      // Archiving is what a delete does now. The card comes off the board and
-      // keeps everything it has — its comments, its files, its history — so it
-      // can be put back exactly as it was. Only the archive itself asks for
-      // `permanent`, and that is the old, unrecoverable path below.
-      if (!permanent) {
-        if (!card.archivedAt) {
-          await db.execute(
-            "UPDATE cards SET archivedAt = NOW() WHERE id = ? AND archivedAt IS NULL",
-            [cardID],
-          );
-          await recordCardActivity(cardID, "archived", userId);
-        }
-
-        // It has left the board, which is what every other client needs to
-        // know; whether it was destroyed or filed away is this endpoint's
-        // business, not theirs.
-        if (auth.viaApiKey) {
-          const serverSocket = getServerSocket();
-          serverSocket.to(`board-${boardRows[0]?.id}`).emit("deletedCard", {
-            boardId: boardRows[0]?.id,
-            card,
-          });
-        }
-        return { message: "Card archived successfully", card };
-      }
-
-      {
-        // Everything that hung off the card — its comments, its attachments and
-        // the files behind them, its reminders, its activity and its
-        // notifications. See `removeCardData`: this used to take the comments
-        // and the notifications only, and leave the rest behind for ever.
-        await removeCardData(db, [Number(cardID)]);
-
-        // Delete Card
-        const [result] = await db.execute("DELETE FROM cards WHERE id = ?", [
-          cardID,
-        ]);
-
-        if (result.affectedRows === 0) {
-          // HIGH FIX: Generic error to prevent card enumeration
-          event.res.statusCode = 404;
-          return { error: "Resource not found or already deleted" };
-        }
-
-        // Emit socket event for card deletion (only for API calls, not frontend)
-        if (auth.viaApiKey) {
-          const serverSocket = getServerSocket();
-          serverSocket.to(`board-${boardRows[0]?.id}`).emit("deletedCard", {
-            boardId: boardRows[0]?.id,
-            card: card,
-          });
-        }
-
-        return { message: "Card deleted successfully", card: card };
-      }
-    } else {
-      event.res.statusCode = 405;
-      return { error: "Method not allowed" };
+export default dataHandler({
+  // One card, with its files.
+  async GET({ db, query, cardOf }) {
+    const id = Array.isArray(query.cardID) ? query.cardID[0] : query.cardID;
+    const { card } = await cardOf(id, "read");
+    const [attachments] = await db.execute(
+      `SELECT ${ATTACHMENT_COLUMNS} FROM attachments WHERE card = ?`,
+      [card.id],
+    );
+    return { card: await cardForBoard(db, card.id), attachments };
+  },
+
+  // A new card at the bottom of an area.
+  async POST({ event, db, userId, viaApiKey, areaOf }) {
+    const { areaId, name, content, status } = await readBody(event);
+    if (!areaId || !name) fail(400, "Required fields are missing");
+    const { area, board } = await areaOf(positiveId(areaId, "Invalid area ID"), "edit");
+    if (area.archivedAt) fail(404, "Resource not found");
+    const { card } = await createCard(
+      db,
+      { area, board },
+      userId,
+      { name, content, done: !!status },
+      viaApiKey,
+    );
+    return { card };
+  },
+
+  // A card changed. The fields it describes are replaced as a whole — what is
+  // left out of name, content, status and the due date is emptied — while
+  // labels, reminders, the people on it and the rhythm are left alone unless
+  // they are sent. Files sent along are added to it.
+  async PUT({ event, db, userId, viaApiKey, cardOf }) {
+    const body = await readBody(event);
+    const { cardID, name, content, status, files, dueDate, reminders, labelIds, repeatEvery } = body;
+    if (!cardID || !name) fail(400, "Required fields are missing");
+
+    // Absent leaves the rhythm alone, empty stops it; anything else has to be
+    // one of the rhythms there are.
+    if (repeatEvery !== undefined && repeatEvery !== null && repeatEvery !== "" && !isRepeatEvery(repeatEvery)) {
+      fail(400, "Invalid repeat value");
     }
-  } catch (error) {
-    logger.error("Database error:", error);
-    event.res.statusCode = 500;
-    return { error: "Internal server error" };
-  }
+    const found = await cardOf(positiveId(cardID, "Invalid card ID"), "edit");
+
+    // `assignees` replaces everyone on the card; the older single `assignee`
+    // replaces them with that one person, or with nobody.
+    const assigneeIds = Array.isArray(body.assignees)
+      ? assigneeIdsFrom(body.assignees)
+      : "assignee" in body
+        ? assigneeIdsFrom(body.assignee ? [body.assignee] : [])
+        : undefined;
+
+    const added: number[] = [];
+    for (const file of Array.isArray(files) ? files : []) {
+      const [result] = await db.execute(
+        "INSERT INTO attachments (card, filename, filetype, filesize, filedata) VALUES (?, ?, ?, ?, ?)",
+        [found.card.id, file.filename, file.filetype, file.filesize, file.filedata],
+      );
+      added.push(result.insertId);
+    }
+    const [attachments] = added.length
+      ? await db.query(`SELECT ${ATTACHMENT_COLUMNS} FROM attachments WHERE id IN (?)`, [added])
+      : [[]];
+
+    const card = await updateCard(
+      db,
+      found,
+      userId,
+      {
+        name,
+        content: content || "",
+        done: !!status,
+        dueDate: dateFrom(dueDate),
+        repeat: repeatEvery,
+        assigneeIds,
+        labelIds: Array.isArray(labelIds) ? labelIds : undefined,
+        reminders: Array.isArray(reminders) ? reminders : undefined,
+      },
+      viaApiKey,
+      attachments,
+    );
+    return { card, attachments };
+  },
+
+  // Into the archive, keeping everything it has; or — when the archive itself
+  // asks — gone for good.
+  async DELETE({ event, db, userId, viaApiKey, cardOf }) {
+    const { cardID, permanent } = await readBody(event);
+    const found = await cardOf(positiveId(cardID, "Invalid card ID"), "edit");
+    await archiveCard(db, found, userId, viaApiKey, !!permanent);
+    return {
+      message: permanent ? "Card deleted successfully" : "Card archived successfully",
+      card: found.card,
+    };
+  },
 });

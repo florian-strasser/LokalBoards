@@ -1,7 +1,7 @@
-import { defineEventHandler, getQuery, setHeader } from "h3";
-import { setupDatabase } from "../../../app/lib/databaseSetup";
+import { setHeader } from "h3";
 import { checklistProgress } from "../../../app/utils/checklistProgress";
 import { downloadDisposition, exportDate } from "../../utils/boardExport";
+import { labelsOn } from "../../utils/cardLists";
 import { cardsToCsv } from "../../utils/cardsCsv";
 
 // The open cards the caller is on, across every board they can still see — on
@@ -36,22 +36,9 @@ const OPEN_WORK = `
           AND b.\`archivedAt\` IS NULL
           AND (b.\`user\` = ? OR b.\`id\` IN (SELECT \`board\` FROM \`invitations\` WHERE \`user\` = ?))`;
 
-export default defineEventHandler(async (event) => {
-  if (event.req.method !== "GET") {
-    event.res.statusCode = 405;
-    return { error: "Method not allowed" };
-  }
-
-  const auth = await resolveUserId(event);
-  if (!auth.ok) {
-    event.res.statusCode = auth.status;
-    return { error: auth.error };
-  }
-  const userId = auth.userId;
-  const db = setupDatabase();
-
-  try {
-    if (getQuery(event).count) {
+export default dataHandler({
+  async GET({ event, db, query, userId }) {
+    if (query.count) {
       const [counted]: any = await db.execute(
         `SELECT COUNT(*) AS count ${OPEN_WORK}`,
         [userId, userId, userId],
@@ -60,7 +47,7 @@ export default defineEventHandler(async (event) => {
     }
 
     // The same list as a spreadsheet, with the board each card is on.
-    if (getQuery(event).format === "csv") {
+    if (query.format === "csv") {
       const [cards]: any = await db.execute(
         `SELECT c.\`id\`, c.\`name\`, c.\`content\`, c.\`status\`, c.\`dueDate\`, c.\`repeatEvery\`,
                 a.\`name\` AS areaName, b.\`id\` AS boardId, b.\`name\` AS boardName,
@@ -96,19 +83,7 @@ export default defineEventHandler(async (event) => {
         LIMIT ${LIMIT}`,
       [userId, userId, userId],
     );
-
-    const labelsByCard = new Map<number, any[]>();
-    if (rows.length) {
-      const [worn]: any = await db.query(
-        "SELECT cl.`card`, l.`id`, l.`name` FROM `card_labels` cl JOIN `labels` l ON l.`id` = cl.`label` WHERE cl.`card` IN (?) ORDER BY l.`sort`, l.`id`",
-        [rows.map((row: any) => row.id)],
-      );
-      for (const label of worn) {
-        const list = labelsByCard.get(label.card) ?? [];
-        list.push({ id: label.id, name: label.name });
-        labelsByCard.set(label.card, list);
-      }
-    }
+    const labels = await labelsOn(db, rows.map((row: any) => row.id));
 
     return {
       cards: rows.map((row: any) => ({
@@ -119,13 +94,9 @@ export default defineEventHandler(async (event) => {
         boardName: row.boardName,
         areaId: row.areaId,
         areaName: row.areaName,
-        labels: labelsByCard.get(row.id) ?? [],
+        labels: labels.get(row.id) ?? [],
         checklist: checklistProgress(row.content),
       })),
     };
-  } catch (error) {
-    logger.error("Database error:", error);
-    event.res.statusCode = 500;
-    return { error: "Internal server error" };
-  }
+  },
 });

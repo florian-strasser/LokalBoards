@@ -1,10 +1,12 @@
 import { defineMcpTool } from "@nuxtjs/mcp-toolkit/server";
 import { setupDatabase } from "../../../app/lib/databaseSetup";
+import { commentsOn } from "../../utils/comments";
 import {
   requireUserId,
   requireCard,
   requireId,
   cardIdInput,
+  serializeComment,
 } from "../../utils/mcpHelpers";
 
 const db = setupDatabase();
@@ -21,18 +23,7 @@ export default defineMcpTool({
     const userId = requireUserId();
     const id = requireId(cardId, cardID, "cardId");
     await requireCard(id, userId, "read");
-    const [rows]: any = await db.execute(
-      "SELECT comments.id AS id, comments.user AS authorId, COALESCE(user.name, comments.authorName) AS authorName, comments.content AS content, comments.date AS date FROM comments LEFT JOIN user ON comments.user = user.id WHERE comments.card = ? ORDER BY comments.date ASC",
-      [id],
-    );
-    return jsonResult({
-      comments: rows.map((r: any) => ({
-        id: r.id,
-        authorId: r.authorId ?? null,
-        authorName: r.authorName || "Unknown",
-        content: r.content ?? "",
-        date: r.date ? new Date(r.date).toISOString() : null,
-      })),
-    });
+    const comments = (await commentsOn(db, id)).reverse();
+    return jsonResult({ comments: comments.map(serializeComment) });
   },
 });

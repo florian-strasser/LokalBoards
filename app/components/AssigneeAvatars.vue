@@ -46,7 +46,7 @@
     </span>
 </template>
 <script setup lang="ts">
-import { Bot } from "lucide-vue-next";
+import { Bot } from "@lucide/vue";
 
 const props = defineProps({
     people: { type: Array as () => any[], default: () => [] },

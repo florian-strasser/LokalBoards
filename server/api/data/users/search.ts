@@ -1,6 +1,3 @@
-import { defineEventHandler, getQuery } from "h3";
-import { setupDatabase } from "../../../../app/lib/databaseSetup";
-
 // Partially mask an email so same-name users can be told apart in the picker
 // without exposing the full address, e.g. "florian@example.com" -> "fl••@exa••.com".
 function maskEmail(email: unknown): string {
@@ -23,44 +20,14 @@ function maskEmail(email: unknown): string {
 // invite picker. Deliberately returns only id/name/image — never the email —
 // so the directory can be searched without harvesting email addresses. The
 // board owner (and only the owner) may search, mirroring who can invite.
-export default defineEventHandler(async (event) => {
-  if (event.req.method !== "GET") {
-    event.res.statusCode = 405;
-    return { error: "Method not allowed" };
-  }
+export default dataHandler({
+  async GET({ db, query, userId }) {
+    const boardId = positiveId(query.boardId, "Invalid board ID");
+    const q = typeof query.q === "string" ? query.q.trim() : "";
 
-  const auth = await resolveUserId(event);
-  if (!auth.ok) {
-    event.res.statusCode = auth.status;
-    return { error: auth.error };
-  }
-  const userId = auth.userId;
-
-  const query = getQuery(event);
-  const boardId = query.boardId;
-  const q = typeof query.q === "string" ? query.q.trim() : "";
-
-  if (!boardId || isNaN(Number(boardId)) || Number(boardId) <= 0) {
-    event.res.statusCode = 400;
-    return { error: "Invalid board ID" };
-  }
-
-  try {
-    const db = setupDatabase();
-
-    const [boardRows] = await db.query("SELECT * FROM boards WHERE id = ?", [
-      boardId,
-    ]);
-    const board = boardRows[0];
-    if (!board) {
-      // Generic error to prevent board enumeration.
-      event.res.statusCode = 404;
-      return { error: "Resource not found" };
-    }
-    if (board.user !== userId) {
-      event.res.statusCode = 403;
-      return { error: "Unauthorized access" };
-    }
+    const [boards]: any = await db.execute("SELECT user FROM boards WHERE id = ?", [boardId]);
+    if (!boards[0]) fail(404, "Resource not found");
+    if (boards[0].user !== userId) fail(403, "Unauthorized access");
 
     // Exclude the owner and anyone already invited to this board.
     let sql =
@@ -69,8 +36,9 @@ export default defineEventHandler(async (event) => {
     const params: any[] = [userId, boardId];
 
     if (q) {
-      sql += " AND (name LIKE ? OR email LIKE ?)";
-      const like = `%${q}%`;
+      // What was typed, literally: a `%` or `_` in it is not a wildcard.
+      sql += " AND (name LIKE ? ESCAPE '\\\\' OR email LIKE ? ESCAPE '\\\\')";
+      const like = `%${escapeLike(String(q))}%`;
       params.push(like, like);
     }
     sql += " ORDER BY name LIMIT 20";
@@ -84,9 +52,5 @@ export default defineEventHandler(async (event) => {
       emailMasked: maskEmail(u.email),
     }));
     return { users };
-  } catch (error) {
-    logger.error("User search error:", error);
-    event.res.statusCode = 500;
-    return { error: "Internal server error" };
-  }
+  },
 });

@@ -230,7 +230,7 @@ import {
     ChevronDown,
     Trash2,
     FolderPlus,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 
 const nuxtApp = useNuxtApp();
 

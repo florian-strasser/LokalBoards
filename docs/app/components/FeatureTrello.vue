@@ -14,7 +14,7 @@
 </template>
 
 <script setup lang="ts">
-import { Check, Download } from "lucide-vue-next";
+import { Check, Download } from "@lucide/vue";
 
 const brings = [
   "Lists and cards",

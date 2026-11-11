@@ -1,16 +1,14 @@
 import { deleteCookie, getCookie, getQuery, sendRedirect } from "h3";
 import { createSession } from "../../../utils/auth";
-import { findProvider } from "../../../utils/ssoProviders";
+import { requestedProvider } from "../../../utils/ssoProviders";
 import {
   claimsAreValid,
   decodeIdToken,
   domainAllowed,
   findOrCreateUser,
   profileFromClaims,
-  readSsoConfig,
   resolveEndpoints,
   safeEqual,
-  ssoIsUsable,
   ssoSubject,
 } from "../../../utils/sso";
 
@@ -27,13 +25,16 @@ export default defineEventHandler(async (event) => {
   // The provider is taken from the cookie the start endpoint set, never from
   // the query string: it decides which issuer and client the token is checked
   // against, and that must be the one this browser was actually sent to.
-  const chosen = getCookie(event, "sso_provider") || "";
-  const provider = chosen && chosen !== "sso" ? findProvider(chosen, event) : null;
-  const config: any = (provider?.config as any) ?? readSsoConfig(event);
-  if (!ssoIsUsable(config)) {
+  const provider = requestedProvider(
+    "oidc",
+    getCookie(event, "sso_provider") || "",
+    event,
+  );
+  if (!provider) {
     event.res.statusCode = 404;
     return { error: "sso_not_configured" };
   }
+  const { config } = provider;
 
   const query = getQuery(event);
   const state = getCookie(event, "sso_state") || "";

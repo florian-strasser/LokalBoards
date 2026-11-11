@@ -8,7 +8,7 @@ import {
 import { setupDatabase } from "../../app/lib/databaseSetup";
 import { logger } from "./logger";
 import type { SsoConfig, SsoProfile } from "./sso";
-import { pickClaim } from "./sso";
+import { isAdminByClaim, pickClaim } from "./sso";
 
 // SAML 2.0, for the organisations whose identity provider speaks that and not
 // OpenID Connect — which in practice means a good deal of higher education,
@@ -56,8 +56,9 @@ function normaliseCert(value: string): string {
 // A key pasted into an environment variable arrives in every shape: with the
 // PEM armour, without it, with real newlines, or with the `\n` escapes that
 // survive a Docker environment file. All four have to work, because getting
-// this wrong produces a decryption failure with nothing to suggest why.
-function pem(value: string, label: string): string {
+// this wrong produces a decryption failure with nothing to suggest why. The
+// metadata endpoint armours the encryption certificate with it as well.
+export function pem(value: string, label: string): string {
   const text = value.replace(/\\n/g, "\n").trim();
   if (!text) return "";
   if (text.includes("-----BEGIN")) return text;
@@ -65,11 +66,8 @@ function pem(value: string, label: string): string {
   return `-----BEGIN ${label}-----\n${body}\n-----END ${label}-----`;
 }
 
-export function readSamlConfig(event?: any): SamlConfig {
-  return samlConfigFrom(useRuntimeConfig(event) as any);
-}
-
-// From a plain object, for the provider registry — see `ssoProviders.ts`.
+// The SAML settings, from an object shaped like the runtime config — the same
+// two ways as `ssoConfigFrom`. See `ssoProviders.ts`.
 export function samlConfigFrom(config: any): SamlConfig {
   const truthy = (value: any) =>
     value === true || String(value).toLowerCase() === "true";
@@ -429,14 +427,5 @@ export function profileFromAssertion(
       .trim() ||
     email.split("@")[0];
 
-  let isAdmin = false;
-  if (config.adminClaim && config.adminValue) {
-    const value = flat[config.adminClaim];
-    const entries = Array.isArray(value)
-      ? value.map(String)
-      : [String(value ?? "")];
-    isAdmin = entries.includes(config.adminValue);
-  }
-
-  return { subject, email, name, isAdmin };
+  return { subject, email, name, isAdmin: isAdminByClaim(flat, config) };
 }

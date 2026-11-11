@@ -41,13 +41,9 @@ export type SsoConfig = {
   userinfoUrl: string;
 };
 
-export function readSsoConfig(event?: any): SsoConfig {
-  return ssoConfigFrom(useRuntimeConfig(event) as any);
-}
-
-// The same reading, from a plain object rather than the runtime config, so a
-// named provider's own settings can be layered over the instance-wide ones
-// before being parsed. See `ssoProviders.ts`.
+// The OpenID Connect settings, from an object shaped like the runtime config:
+// the runtime config itself for the unprefixed provider, or a named provider's
+// own settings layered over it. See `ssoProviders.ts`.
 export function ssoConfigFrom(config: any): SsoConfig {
   const truthy = (value: any) =>
     value === true || String(value).toLowerCase() === "true";
@@ -150,21 +146,18 @@ export async function resolveEndpoints(config: SsoConfig): Promise<{
   };
 }
 
-// Only for the tests, which stand up a provider per case on a fresh port.
-export function forgetDiscovery() {
-  discovered = null;
-}
-
 // --- the short-lived state that ties one sign-in attempt together -----------
 
 export function randomToken(bytes = 32): string {
   return randomBytes(bytes).toString("base64url");
 }
 
+/** The S256 PKCE challenge for a verifier — here and in the OAuth server (oauth.ts). */
 export function pkceChallenge(verifier: string): string {
   return createHash("sha256").update(verifier).digest("base64url");
 }
 
+/** Constant-time compare for anything secret-shaped: states, nonces, PKCE challenges, hashes. */
 export function safeEqual(a: string, b: string): boolean {
   const left = Buffer.from(String(a), "utf8");
   const right = Buffer.from(String(b), "utf8");
@@ -278,18 +271,21 @@ export function profileFromClaims(
     [claims.given_name, claims.family_name].filter(Boolean).join(" ").trim() ||
     email.split("@")[0];
 
-  // An optional claim that says who administers this instance, so an
-  // organisation can run its admin list from its own directory rather than
-  // here. Matches a string claim or any entry of a list one, which is how
-  // groups and roles arrive.
-  let isAdmin = false;
-  if (config.adminClaim && config.adminValue) {
-    const value = claims[config.adminClaim];
-    const entries = Array.isArray(value) ? value.map(String) : [String(value ?? "")];
-    isAdmin = entries.includes(config.adminValue);
-  }
+  return { subject, email, name, isAdmin: isAdminByClaim(claims, config) };
+}
 
-  return { subject, email, name, isAdmin };
+// An optional claim (an attribute, for SAML) that says who administers this
+// instance, so an organisation can run its admin list from its own directory
+// rather than here. Matches a string claim or any entry of a list one, which is
+// how groups and roles arrive.
+export function isAdminByClaim(
+  claims: Record<string, any>,
+  config: SsoConfig,
+): boolean {
+  if (!config.adminClaim || !config.adminValue) return false;
+  const value = claims[config.adminClaim];
+  const entries = Array.isArray(value) ? value.map(String) : [String(value ?? "")];
+  return entries.includes(config.adminValue);
 }
 
 // The provider's own identifier for this person, which is what the account is
