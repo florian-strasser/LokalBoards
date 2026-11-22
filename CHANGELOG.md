@@ -1,3 +1,18 @@
+## v0.42.2
+
+### Improvements
+
+- **Links stand out.** In descriptions, comments and notifications, and in the editor while you write, a link is drawn in the primary colour rather than the colour of the text around it, which it only took on under the pointer — so you can see where one starts and ends.
+
+### Fixes
+
+- **A link in a description or comment ends where its address ends.** Whatever was typed right after a link became part of it, and so did anything typed in front of a link at the start of a line — a description that began with an address could turn into one long link, stored as `[https://… and the rest of the text](https://…)`. The editor's link mark reached past its own end because it links addresses as you type, which it does just as well without: an address is still linked once a space follows it. Clicking into a link while editing now puts the caret there instead of opening the address in a new tab, and the toolbar has a **Link** button: on a link it takes the link away, all of it, wherever the caret is in it — the way to mend a description that already ran together, after which the address alone is a link again — and elsewhere it asks for an address and links the selected words with it. The same goes for comments, which use the same editor.
+- **`npm run dev` starts again.** The development server stopped at once with `options.hostname.toLowerCase is not a function`: with no host configured, Nuxt's resolved configuration holds an empty object for the address, `@nuxt/cli` 4.0.1 took it for a name and saved it for the next start as well. 4.0.3 uses an address only when it is one, and ignores a saved one that is not, so nothing needs deleting. The documentation site is on it too. Only development was affected; the image never runs the development server.
+
+### Security
+
+- **Hono 4.13.19 and `@hono/node-server` 2.1.9.** They close seven advisories — middleware skipped for some paths, a backslash read as a path separator, a WebSocket upgrade that could crash the process, `csrf()`, form validation and the `css` helper. Both come with the MCP SDK, for a way of serving MCP that LokalBoards does not use: its MCP server runs on Nuxt's own, so none of this was reachable, and neither package is in the image. They were already held to a minimum version, which is raised to the fixed releases.
+
 ## v0.42.1
 
 ### Security

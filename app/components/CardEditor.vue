@@ -47,6 +47,17 @@
             <li>
                 <button
                     type="button"
+                    @click="toggleLink"
+                    class="block hover:text-primary-hover"
+                    :class="{ 'text-primary': editor.isActive('link') }"
+                    v-tooltip="$t('editorLink')"
+                >
+                    <LinkIcon class="size-5" />
+                </button>
+            </li>
+            <li>
+                <button
+                    type="button"
                     @click="editor.chain().focus().toggleBulletList().run()"
                     class="block hover:text-primary-hover"
                     :class="{ 'text-primary': editor.isActive('bulletList') }"
@@ -136,6 +147,7 @@ import {
     Bold,
     Italic,
     Strikethrough,
+    LinkIcon,
     List,
     ListOrdered,
     FileImage,
@@ -147,6 +159,7 @@ import { useEditor, EditorContent } from "@tiptap/vue-3";
 import { Placeholder } from "@tiptap/extensions";
 import { TaskItem, TaskList } from "@tiptap/extension-list";
 import Image from "@tiptap/extension-image";
+import { Link } from "@tiptap/extension-link";
 import Emoji from "@tiptap/extension-emoji";
 import { editorEmojis } from "~/composables/useEmojiIndex";
 import FileHandler from "@tiptap/extension-file-handler";
@@ -161,7 +174,19 @@ const editor = useEditor({
     extensions: [
         StarterKit.configure({
             Heading: false,
+            // Ours, below.
+            link: false,
         }),
+        // A link ends where its address ends. Tiptap makes the mark inclusive
+        // while it links addresses as they are typed, so whatever was typed
+        // right after a link — or in front of one that opens the paragraph —
+        // joined it, and a description starting with an address could become
+        // one long link. Linking as you type does not need it: an address is
+        // linked when a space follows it, whatever is around it.
+        //
+        // And a click puts the caret in a link, as in any other text, rather
+        // than opening it: the saved card opens it.
+        Link.extend({ inclusive: false }).configure({ openOnClick: false }),
         Placeholder.configure({
             placeholder: $t("writeSomething"),
         }),
@@ -294,6 +319,27 @@ const editor = useEditor({
     },
     injectCSS: false,
 });
+// In a link, the button takes it away — all of it, wherever the caret is in
+// it. Anywhere else it asks for an address and links the selected words, or
+// puts the address in as a link of its own. An address typed without a scheme
+// is taken to be a web address; one the link refuses (`javascript:` and the
+// like) is not linked.
+const toggleLink = () => {
+    if (editor.value.isActive("link")) {
+        editor.value.chain().focus().unsetLink().run();
+        return;
+    }
+    let href = window.prompt("URL")?.trim();
+    if (!href) return;
+    if (!/^([a-z][a-z0-9+.-]*:|\/|#)/i.test(href)) href = `https://${href}`;
+    if (!editor.value.can().setLink({ href })) return;
+    const chain = editor.value.chain().focus();
+    if (editor.value.state.selection.empty) {
+        chain.insertContent({ type: "text", text: href, marks: [{ type: "link", attrs: { href } }] }).run();
+    } else {
+        chain.setLink({ href }).run();
+    }
+};
 const addImage = async () => {
     const url = window.prompt("URL");
     if (url) {

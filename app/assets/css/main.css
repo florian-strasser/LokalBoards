@@ -613,6 +613,11 @@ img.ProseMirror-separator {
         "Liberation Mono", "Courier New", monospace;
     font-size: 0.875em;
 }
+/* A link shows where it starts and ends, in the editor too. */
+.tiptap a,
+.wysiwyg-wrapper a {
+    color: var(--color-primary);
+}
 .tiptap a:hover,
 .wysiwyg-wrapper a:hover {
     color: var(--color-primary-hover);
