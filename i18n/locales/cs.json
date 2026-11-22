@@ -189,6 +189,8 @@
   "editorImage": "Obrázek",
   "editorItalic": "Kurzíva",
   "editorLink": "Odkaz",
+  "editorLinkAdd": "Vložit odkaz",
+  "editorLinkAddress": "Adresa",
   "editorOrderedList": "Číslovaný seznam",
   "editorStrike": "Přeškrtnuté",
   "email": "E-mail",

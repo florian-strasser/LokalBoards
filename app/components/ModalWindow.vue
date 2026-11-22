@@ -9,9 +9,18 @@
     <!-- The space around the card closes it, but only when the whole press
          happened there: selecting text inside the card and letting go beside
          it is reported as a click on that space too (see `pressTracker`). -->
+    <!-- A `nested` dialog is opened from inside another one, whose card moves
+         with a transform — and a transformed element is what `fixed` measures
+         from, so in place this one would cover that card rather than the
+         window. In <body> it covers the window, one layer up: Vue puts what
+         it teleports ahead of `#__nuxt`, where a tie would put it underneath. -->
+    <Teleport to="body" :disabled="!nested">
     <div
-        :class="{ 'transform translate-x-full': !visible }"
-        class="fixed top-0 left-0 w-full h-dvh z-40 flex flex-col justify-center overflow-hidden"
+        :class="[
+            { 'transform translate-x-full': !visible },
+            nested ? 'z-50' : 'z-40',
+        ]"
+        class="fixed top-0 left-0 w-full h-dvh flex flex-col justify-center overflow-hidden"
         @pointerdown="press.down"
         @pointerup="press.up"
     >
@@ -73,6 +82,7 @@
             </div>
         </motion.div>
     </div>
+    </Teleport>
 </template>
 <script setup lang="ts">
 import { X } from "@lucide/vue";
@@ -86,6 +96,9 @@ const props = defineProps({
     // on a desktop with a date, a name and the longest rhythm in it; at the
     // width a confirmation dialog wants, the last button wraps onto its own.
     wide: Boolean,
+    // Opened from inside another dialog, such as the address of a link asked
+    // from a card's description: see the template and `handleEscKey`.
+    nested: Boolean,
 });
 
 const open = defineModel();
@@ -177,10 +190,17 @@ watch(
     { immediate: true },
 );
 
+// Every dialog listens on the window, so one Escape would close a nested
+// dialog and the one it was opened from together. A nested one listens in the
+// capture phase, which comes first, and keeps the Escape while it is open:
+// it closes, and the dialog beneath stays.
 const handleEscKey = (event) => {
-    if (event.key === "Escape") {
-        closeModal();
+    if (event.key !== "Escape") return;
+    if (props.nested) {
+        if (!open.value) return;
+        event.stopPropagation();
     }
+    closeModal();
 };
 
 const closeModal = () => {
@@ -197,11 +217,11 @@ const closeFromOutside = (event) => {
 };
 
 onMounted(() => {
-    window.addEventListener("keydown", handleEscKey);
+    window.addEventListener("keydown", handleEscKey, { capture: props.nested });
 });
 
 onUnmounted(() => {
     syncCount(false);
-    window.removeEventListener("keydown", handleEscKey);
+    window.removeEventListener("keydown", handleEscKey, { capture: props.nested });
 });
 </script>

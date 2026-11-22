@@ -189,6 +189,8 @@
   "editorImage": "Зображення",
   "editorItalic": "Курсив",
   "editorLink": "Посилання",
+  "editorLinkAdd": "Додати посилання",
+  "editorLinkAddress": "Адреса",
   "editorOrderedList": "Нумерований список",
   "editorStrike": "Закреслений",
   "email": "Електронна пошта",

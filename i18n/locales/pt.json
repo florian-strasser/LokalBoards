@@ -189,6 +189,8 @@
   "editorImage": "Imagem",
   "editorItalic": "Itálico",
   "editorLink": "Link",
+  "editorLinkAdd": "Adicionar link",
+  "editorLinkAddress": "Endereço",
   "editorOrderedList": "Lista numerada",
   "editorStrike": "Tachado",
   "email": "E-mail",

@@ -189,6 +189,8 @@
   "editorImage": "Afbeelding",
   "editorItalic": "Cursief",
   "editorLink": "Link",
+  "editorLinkAdd": "Link toevoegen",
+  "editorLinkAddress": "Adres",
   "editorOrderedList": "Genummerde lijst",
   "editorStrike": "Doorhalen",
   "email": "E-mail",

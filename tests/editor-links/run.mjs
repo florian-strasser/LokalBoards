@@ -6,7 +6,9 @@
 // stored as `[https://… and the rest of the text](https://…)`. Clicking into it
 // to fix it opened the address instead, and nothing in the toolbar took a link
 // away. This types around links, repairs such a description with the link
-// button, and checks that typing an address still makes a link of it.
+// button, makes links with it through the app's own dialog — which closes on
+// its own with Escape and leaves the card open — and checks that typing an
+// address still makes a link of it.
 //
 // Requires a built app (`npm run build`) and the credentials in `.env.local`.
 // Creates and drops a database of its own; it never touches an existing one.
@@ -178,24 +180,42 @@ try {
 
   // ------------------------------------------------------ making a link ----
   console.log("\nmaking a link");
-  const made = await card("Read the manual first");
-  await openEditor(made);
-  await page.evaluate(() => {
-    const p = document.querySelector(".tiptap p");
-    const text = p.firstChild;
+  // The link dialog is in <body>, one per editor; the open one is on screen.
+  const linkDialog = page.locator("div.fixed.z-50:not(.translate-x-full)", { has: page.locator("input[type=submit][value='Add link']") });
+  // The card, on screen: it leaves the page when it closes.
+  const openCard = page.locator("div.fixed.z-40:not(.translate-x-full) .card-modal");
+  const select = (from, to) => page.evaluate(([from, to]) => {
+    const text = document.querySelector(".tiptap p").firstChild;
     const range = document.createRange();
-    range.setStart(text, 9);
-    range.setEnd(text, 15);
+    range.setStart(text, from);
+    range.setEnd(text, to ?? text.length);
     const selection = window.getSelection();
     selection.removeAllRanges();
     selection.addRange(range);
-  });
+  }, [from, to]);
+  const askForLink = async () => {
+    await page.locator(".editor-toolbar button:has(svg.lucide-link)").click();
+    await page.waitForTimeout(500);
+  };
+
+  const made = await card("Read the manual first");
+  await openEditor(made);
+  await select(9, 15);
   await page.waitForTimeout(150);
-  page.once("dialog", (dialog) => dialog.accept("https://www.lokalboards.com/docs"));
-  await page.locator(".editor-toolbar button:has(svg.lucide-link)").click();
-  await page.waitForTimeout(300);
+  await askForLink();
+  check("the link button opens the app's own dialog", await linkDialog.count() === 1, `${await linkDialog.count()} open`);
+  check("and has the caret in its address field",
+    await page.evaluate(() => document.activeElement?.closest("div.fixed.z-50") !== null && document.activeElement?.type === "text"));
+  // A click, not a fill: it fails if anything lies on top of the field.
+  await linkDialog.locator("input[type=text]").click();
+  await page.keyboard.type("https://www.lokalboards.com/docs");
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(600);
+  check("Enter adds the link and closes the dialog", await linkDialog.count() === 0);
   seen = await links();
-  check("the link button makes a link of the selected words", seen.length === 1 && seen[0] === "manual", JSON.stringify(seen));
+  check("the link is made of the selected words", seen.length === 1 && seen[0] === "manual", JSON.stringify(seen));
+  check("and the caret is back in the text",
+    await page.evaluate(() => !!document.activeElement?.closest(".tiptap")));
   await save();
   content = await stored(made);
   check("and it is stored as one", content === "Read the [manual](https://www.lokalboards.com/docs) first", JSON.stringify(content));
@@ -203,28 +223,37 @@ try {
   const bare = await card("");
   await openEditor(bare);
   await page.locator(".tiptap").first().click();
-  page.once("dialog", (dialog) => dialog.accept("lokalboards.com"));
-  await page.locator(".editor-toolbar button:has(svg.lucide-link)").click();
-  await page.waitForTimeout(300);
+  await askForLink();
+  await linkDialog.locator("input[type=text]").fill("lokalboards.com");
+  await linkDialog.locator("input[type=submit]").click();
+  await page.waitForTimeout(600);
   const put = await page.locator(".tiptap a").evaluateAll((nodes) => nodes.map((n) => [n.textContent, n.getAttribute("href")]));
   check("with nothing selected it puts the address in as a link, a web address when it has no scheme",
     put.length === 1 && put[0][0] === "https://lokalboards.com" && put[0][1] === "https://lokalboards.com", JSON.stringify(put));
 
   const unsafe = await card("Click here");
   await openEditor(unsafe);
-  await page.evaluate(() => {
-    const range = document.createRange();
-    range.selectNodeContents(document.querySelector(".tiptap p"));
-    const selection = window.getSelection();
-    selection.removeAllRanges();
-    selection.addRange(range);
-  });
+  await select(0);
   await page.waitForTimeout(150);
-  page.once("dialog", (dialog) => dialog.accept("javascript:alert(1)"));
-  await page.locator(".editor-toolbar button:has(svg.lucide-link)").click();
+  await askForLink();
+  const submit = linkDialog.locator("input[type=submit]");
+  check("the dialog cannot add a link without an address", await submit.isDisabled());
+  await linkDialog.locator("input[type=text]").fill("javascript:alert(1)");
+  check("nor with one that is not an address", await submit.isDisabled());
+  await page.keyboard.press("Enter");
   await page.waitForTimeout(300);
+  check("and Enter does not add it either", (await links()).length === 0 && await linkDialog.count() === 1);
+
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(700);
+  check("Escape closes the link dialog", await linkDialog.count() === 0);
+  check("and leaves the card open", await openCard.count() === 1);
+  check("with the caret back in the text", await page.evaluate(() => !!document.activeElement?.closest(".tiptap")));
   seen = await links();
-  check("an address that is not one is not linked", seen.length === 0, JSON.stringify(seen));
+  check("and nothing linked", seen.length === 0, JSON.stringify(seen));
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(700);
+  check("the next Escape closes the card", await openCard.count() === 0);
 } catch (error) {
   console.error(`\n FAIL  the run stopped early — ${error.message.split("\n")[0]}`);
   failures++;

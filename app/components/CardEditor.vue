@@ -140,6 +140,24 @@
         <!-- `editor-box`: see main.css. It is there for Safari, which otherwise
              paints a selection of one emoji across the whole line. -->
         <EditorContent :editor="editor" class="editor-box" />
+        <!-- The address of a new link: a dialog of the app's own rather than
+             the browser's prompt. -->
+        <ModalWindow v-model="linkDialog" nested>
+            <form @submit.prevent="applyLink" class="space-y-5 text-left">
+                <InputField
+                    type="text"
+                    :label="$t('editorLinkAddress')"
+                    v-model="linkHref"
+                    ref="linkField"
+                />
+                <input
+                    type="submit"
+                    :disabled="!linkAccepted"
+                    class="bg-primary hover:bg-primary-hover disabled:opacity-60 w-full cursor-pointer rounded-lg px-6 py-3 text-center text-white"
+                    :value="$t('editorLinkAdd')"
+                />
+            </form>
+        </ModalWindow>
     </div>
 </template>
 <script setup lang="ts">
@@ -321,18 +339,34 @@ const editor = useEditor({
 });
 // In a link, the button takes it away — all of it, wherever the caret is in
 // it. Anywhere else it asks for an address and links the selected words, or
-// puts the address in as a link of its own. An address typed without a scheme
-// is taken to be a web address; one the link refuses (`javascript:` and the
-// like) is not linked.
-const toggleLink = () => {
+// puts the address in as a link of its own.
+const linkDialog = ref(false);
+const linkHref = ref("");
+const linkField = ref();
+const toggleLink = async () => {
     if (editor.value.isActive("link")) {
         editor.value.chain().focus().unsetLink().run();
         return;
     }
-    let href = window.prompt("URL")?.trim();
-    if (!href) return;
-    if (!/^([a-z][a-z0-9+.-]*:|\/|#)/i.test(href)) href = `https://${href}`;
-    if (!editor.value.can().setLink({ href })) return;
+    linkHref.value = "";
+    linkDialog.value = true;
+    await nextTick();
+    linkField.value?.$el?.querySelector("input")?.focus();
+};
+// An address typed without a scheme is taken to be a web address; one the
+// link refuses (`javascript:` and the like) cannot be added.
+const linkAddress = computed(() => {
+    const href = linkHref.value.trim();
+    if (!href) return "";
+    return /^([a-z][a-z0-9+.-]*:|\/|#)/i.test(href) ? href : `https://${href}`;
+});
+const linkAccepted = computed(
+    () => !!linkAddress.value && !!editor.value?.can().setLink({ href: linkAddress.value }),
+);
+const applyLink = () => {
+    if (!linkAccepted.value) return;
+    const href = linkAddress.value;
+    linkDialog.value = false;
     const chain = editor.value.chain().focus();
     if (editor.value.state.selection.empty) {
         chain.insertContent({ type: "text", text: href, marks: [{ type: "link", attrs: { href } }] }).run();
@@ -340,6 +374,10 @@ const toggleLink = () => {
         chain.setLink({ href }).run();
     }
 };
+// However the dialog closes, the caret goes back where it was.
+watch(linkDialog, (open) => {
+    if (!open) editor.value?.commands.focus();
+});
 const addImage = async () => {
     const url = window.prompt("URL");
     if (url) {

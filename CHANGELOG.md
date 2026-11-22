@@ -1,3 +1,9 @@
+## v0.42.3
+
+### Improvements
+
+- **The Link button asks for the address in a dialog of the app's own,** not in the browser's prompt: an address field and a button, over the card, in the app's colours and in both themes. **Add link** stays greyed out until there is an address it can use, so a `javascript:` one cannot be added. Enter adds the link, and Escape closes the dialog alone, leaving the card open and the caret back where it was. A dialog opened from inside another one now has a `nested` option in `ModalWindow` for that: it sits above the dialog it came from and keeps the Escape to itself.
+
 ## v0.42.2
 
 ### Improvements
