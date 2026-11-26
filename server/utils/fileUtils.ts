@@ -95,15 +95,42 @@ export async function readUpload(
   }
   const parts = (await readMultipartFormData(event)) ?? [];
   const file = parts.length ? pick(parts) : undefined;
-  const kind = file?.type ? kinds[file.type.toLowerCase()] : undefined;
-  if (!file || !kind) throw invalid();
+  if (!file) throw invalid();
 
   const data = Buffer.isBuffer(file.data) ? file.data : Buffer.from(file.data);
   if (data.length > maxBytes) throw invalid();
-  if (kind.magic && !kind.magic.every((byte, index) => data[index] === byte)) {
-    throw invalid();
-  }
+  const kind = provenKind(kinds, file.type, data);
+  if (!kind) throw invalid();
   return { file, parts, data, extension: kind.extension };
+}
+
+/**
+ * The kind these bytes are, when `type` is one of `kinds` and the bytes begin
+ * the way that kind does; null otherwise.
+ */
+export function provenKind(kinds: UploadKinds, type: unknown, data: Buffer) {
+  const kind = typeof type === "string" ? kinds[type.toLowerCase()] : undefined;
+  if (!kind) return null;
+  if (kind.magic && !kind.magic.every((byte, index) => data[index] === byte)) return null;
+  return kind;
+}
+
+// What a browser may show in a tab rather than save: pictures and PDFs, which
+// cannot run anything on this app's address. Every other file is sent to be
+// saved — an HTML or SVG file shown in a tab would run its scripts as the app,
+// with the rights of whoever opened it. `nosniff` goes with it, so a browser
+// takes the type it is told and never guesses its way to HTML.
+const SHOWN_IN_A_TAB = new Set([
+  "application/pdf",
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+]);
+
+/** Whether a file of this type may be shown in a tab. */
+export function showsInTab(type: unknown): boolean {
+  return SHOWN_IN_A_TAB.has(String(type ?? "").toLowerCase());
 }
 
 export function getFileExtension(filename: string): string {

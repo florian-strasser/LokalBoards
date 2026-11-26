@@ -20,6 +20,15 @@ const mysqlPassword =
 const mysqlDatabase =
   runtimeConfig?.mysqlDatabase ?? process.env.NUXT_MYSQL_DATABASE;
 
+// There is no password to fall back on, so a database configured without one
+// is tried without one — said once at start, where somebody who forgot to set
+// it will look when the connection is refused.
+if (!mysqlPassword) {
+  logger.warn(
+    `NUXT_MYSQL_PASSWORD is not set: connecting to the database at ${mysqlHost} as ${mysqlUser} without a password.`,
+  );
+}
+
 // Enable TLS when the database server requires it (e.g. managed/external MySQL
 // such as Mittwald). Opt-in via NUXT_MYSQL_SSL=true so local/compose MySQL
 // without TLS keeps working. Certificate verification stays on by default;

@@ -12,5 +12,6 @@ export default defineEventHandler((event) => {
   // Favicons are cached hard by browsers anyway; a modest TTL lets a colour
   // change (env + restart) propagate on the next visit without a hard refresh.
   setHeader(event, "cache-control", "public, max-age=3600");
-  return buildFaviconSvg(colorPrimary);
+  // The default for a setting that is not a colour (see `cssColour`).
+  return buildFaviconSvg(cssColour(colorPrimary) ?? "#0066CC");
 });

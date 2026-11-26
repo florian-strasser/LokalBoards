@@ -1159,7 +1159,10 @@ const openAttachment = (attachment) => {
         );
         return;
     }
-    if (type.startsWith("image/")) {
+    // The pictures the server shows in a tab (`showsInTab`), no others: an SVG
+    // made into a `blob:` address here would run its scripts as the app, were
+    // that address ever opened on its own.
+    if (["image/png", "image/jpeg", "image/gif", "image/webp"].includes(type)) {
         openImageAttachment(attachment);
         return;
     }

@@ -91,6 +91,11 @@ try {
       const context = await browser.newContext();
       const page = await context.newPage();
       await page.goto(`${base}/`, { waitUntil: "load" });
+      // The app takes over the form a few milliseconds after `load`. A click
+      // before that is the browser's own submit, which only reloads the page —
+      // Chromium is quick enough to get there first, and the check then read
+      // a race as a refused cookie.
+      await page.waitForFunction(() => !!document.querySelector("#__nuxt")?.__vue_app__);
       await page.fill("input[type=email]", email);
       await page.fill("input[type=password]", password);
       await page.click("input[type=submit]");

@@ -38,7 +38,7 @@
     "motion-v": "^2.3.0",
     "mysql2": "^3.23.1",
     "nodemailer": "^10.0.13",
-    "nuxt": "^4.6.4",
+    "nuxt": "^4.7.0",
     "sharp": "^0.35.4",
     "socket.io": "^4.8.3",
     "socket.io-client": "^4.8.3",

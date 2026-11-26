@@ -61,15 +61,25 @@ export default defineNitroPlugin((nitroApp: NitroApp) => {
 
   // Board access for a socket, memoised briefly: these checks sit in front of
   // every realtime event, and a board's membership does not change per keystroke.
+  //
+  // What a socket may do is what the same person may do through the API.
+  // Joining a board or a card to watch it takes `read`. Telling the others
+  // that something changed takes `edit` — the change itself went through the
+  // API, which wanted edit access for it — and a board's own settings and
+  // its deletion take its owner. Anything less, and somebody who may only
+  // look, or any signed-in person on a public board, could show everyone
+  // else cards and comments that were never written.
   const ACCESS_TTL_MS = 30_000;
-  const canAccessBoard = async (socket: any, boardId: any) => {
+  type Need = "read" | "edit" | "owner";
+  const canAccessBoard = async (socket: any, boardId: any, need: Need = "read") => {
     const id = Number(boardId);
     if (!Number.isInteger(id) || id <= 0) return false;
     const user = await sessionUser(socket);
     if (!user) return false;
 
-    socket.data.access ??= new Map<number, { ok: boolean; at: number }>();
-    const cached = socket.data.access.get(id);
+    socket.data.access ??= new Map<string, { ok: boolean; at: number }>();
+    const key = `${id}:${need}`;
+    const cached = socket.data.access.get(key);
     if (cached && Date.now() - cached.at < ACCESS_TTL_MS) return cached.ok;
 
     let ok = false;
@@ -78,14 +88,16 @@ export default defineNitroPlugin((nitroApp: NitroApp) => {
         "SELECT * FROM `boards` WHERE id = ?",
         [id],
       );
-      if (board) {
-        const decision = await authorizeBoard(db, board, user.id, "read");
+      if (board && need === "owner") {
+        ok = board.user === user.id;
+      } else if (board) {
+        const decision = await authorizeBoard(db, board, user.id, need);
         ok = !!decision.ok;
       }
     } catch (err) {
       logger.error("Socket board access check failed:", err);
     }
-    socket.data.access.set(id, { ok, at: Date.now() });
+    socket.data.access.set(key, { ok, at: Date.now() });
     return ok;
   };
 
@@ -105,9 +117,9 @@ export default defineNitroPlugin((nitroApp: NitroApp) => {
     }
   };
 
-  const canAccessCard = async (socket: any, cardID: any) => {
+  const canAccessCard = async (socket: any, cardID: any, need: Need = "read") => {
     const boardId = await boardOfCard(cardID);
-    return boardId ? canAccessBoard(socket, boardId) : false;
+    return boardId ? canAccessBoard(socket, boardId, need) : false;
   };
 
   // Live presence: who currently has a card open, keyed by card id then socket
@@ -243,7 +255,7 @@ export default defineNitroPlugin((nitroApp: NitroApp) => {
 
     // CommentCreated
     socket.on("commentCreated", async ({ cardID, comment }) => {
-      if (!(await canAccessCard(socket, cardID))) return;
+      if (!(await canAccessCard(socket, cardID, "edit"))) return;
       logger.debug(
         `Kommentar ${comment.id} wurde auf Card ${cardID} erstellt (user-${socket.id})`,
       );
@@ -255,7 +267,7 @@ export default defineNitroPlugin((nitroApp: NitroApp) => {
 
     // CommentDeleted
     socket.on("commentDeleted", async ({ cardID, commentId }) => {
-      if (!(await canAccessCard(socket, cardID))) return;
+      if (!(await canAccessCard(socket, cardID, "edit"))) return;
       logger.debug(
         `Kommentar ${commentId} wurde auf Card ${cardID} gelöscht (user-${socket.id})`,
       );
@@ -269,7 +281,7 @@ export default defineNitroPlugin((nitroApp: NitroApp) => {
 
     // CommentUpdated
     socket.on("commentUpdated", async ({ cardID, comment }) => {
-      if (!(await canAccessCard(socket, cardID))) return;
+      if (!(await canAccessCard(socket, cardID, "edit"))) return;
       logger.debug(
         `Kommentar ${comment.id} wurde auf Card ${cardID} aktualisiert (user-${socket.id})`,
       );
@@ -292,7 +304,7 @@ export default defineNitroPlugin((nitroApp: NitroApp) => {
         boardImage,
         boardColor,
       }) => {
-        if (!(await canAccessBoard(socket, boardID))) return;
+        if (!(await canAccessBoard(socket, boardID, "owner"))) return;
         logger.debug(`Board ${boardID} wurde aktualisiert (user-${socket.id})`);
         io.except(`user-${socket.id}`)
           .to(`board-${boardID}`)
@@ -309,7 +321,7 @@ export default defineNitroPlugin((nitroApp: NitroApp) => {
 
     // BoardDeleted
     socket.on("boardDeleted", async ({ boardID }) => {
-      if (!(await canAccessBoard(socket, boardID))) return;
+      if (!(await canAccessBoard(socket, boardID, "owner"))) return;
       logger.debug(`Board ${boardID} wurde gelöscht (user-${socket.id})`);
       io.except(`user-${socket.id}`)
         .to(`board-${boardID}`)
@@ -320,7 +332,7 @@ export default defineNitroPlugin((nitroApp: NitroApp) => {
 
     // AreasUpdated
     socket.on("areasUpdated", async ({ boardId, areas }) => {
-      if (!(await canAccessBoard(socket, boardId))) return;
+      if (!(await canAccessBoard(socket, boardId, "edit"))) return;
       logger.debug(
         `Area-Sortierung wurde auf Board ${boardId} angepasst (user-${socket.id})`,
       );
@@ -334,7 +346,7 @@ export default defineNitroPlugin((nitroApp: NitroApp) => {
 
     // AreaCreated
     socket.on("areaCreated", async ({ boardId, area }) => {
-      if (!(await canAccessBoard(socket, boardId))) return;
+      if (!(await canAccessBoard(socket, boardId, "edit"))) return;
       logger.debug(
         `Area ${area.id} wurde auf Board ${boardId} erstellt (user-${socket.id})`,
       );
@@ -346,7 +358,7 @@ export default defineNitroPlugin((nitroApp: NitroApp) => {
 
     // AreaUpdated
     socket.on("areaUpdated", async ({ boardId, area }) => {
-      if (!(await canAccessBoard(socket, boardId))) return;
+      if (!(await canAccessBoard(socket, boardId, "edit"))) return;
       logger.debug(
         `Area ${area.id} wurde auf Board ${boardId} aktualisiert (user-${socket.id})`,
       );
@@ -358,7 +370,7 @@ export default defineNitroPlugin((nitroApp: NitroApp) => {
 
     // AreaDeleted
     socket.on("areaDeleted", async ({ boardId, area }) => {
-      if (!(await canAccessBoard(socket, boardId))) return;
+      if (!(await canAccessBoard(socket, boardId, "edit"))) return;
       logger.debug(
         `Area ${area} wurde auf Board ${boardId} gelöscht (user-${socket.id})`,
       );
@@ -372,7 +384,7 @@ export default defineNitroPlugin((nitroApp: NitroApp) => {
     // `after` is set for a copy: the card it goes directly under. A new card
     // has none and goes to the bottom.
     socket.on("cardCreated", async ({ boardId, card, after }) => {
-      if (!(await canAccessBoard(socket, boardId))) return;
+      if (!(await canAccessBoard(socket, boardId, "edit"))) return;
       logger.debug(
         `Karte ${card.id} wurde auf Board ${boardId} erstellt (user-${socket.id})`,
       );
@@ -385,7 +397,7 @@ export default defineNitroPlugin((nitroApp: NitroApp) => {
 
     // CardUpdated
     socket.on("cardUpdated", async ({ boardId, attachments, card }) => {
-      if (!(await canAccessBoard(socket, boardId))) return;
+      if (!(await canAccessBoard(socket, boardId, "edit"))) return;
       logger.debug(
         `Karte ${card.id} wurde auf Board ${boardId} aktualisiert (user-${socket.id})`,
       );
@@ -400,7 +412,7 @@ export default defineNitroPlugin((nitroApp: NitroApp) => {
     socket.on(
       "cardMoved",
       async ({ boardId, cardId, fromAreaId, toAreaId, newIndex }) => {
-        if (!(await canAccessBoard(socket, boardId))) return;
+        if (!(await canAccessBoard(socket, boardId, "edit"))) return;
         logger.debug(
           `Karte ${cardId} wurde von Area #${fromAreaId} zu #${toAreaId} auf Board ${boardId} geschoben (user-${socket.id})`,
         );
@@ -418,7 +430,7 @@ export default defineNitroPlugin((nitroApp: NitroApp) => {
 
     // CardOrderd
     socket.on("cardOrderd", async ({ boardId, cardId, areaId, newIndex }) => {
-      if (!(await canAccessBoard(socket, boardId))) return;
+      if (!(await canAccessBoard(socket, boardId, "edit"))) return;
       logger.debug(
         `Karte ${cardId} wurde innerhalb von Area #${areaId} auf Board ${boardId} sortiert (user-${socket.id})`,
       );
@@ -433,7 +445,7 @@ export default defineNitroPlugin((nitroApp: NitroApp) => {
     // A branch of the mind map was dragged somewhere else. The mover has
     // already saved it; this is only so the other boards move it too.
     socket.on("mapMoved", async ({ boardId, nodes }) => {
-      if (!(await canAccessBoard(socket, boardId))) return;
+      if (!(await canAccessBoard(socket, boardId, "edit"))) return;
       if (!Array.isArray(nodes) || !nodes.length) return;
       logger.debug(
         `${nodes.length} Knoten wurden auf der Mindmap von Board ${boardId} verschoben (user-${socket.id})`,
@@ -445,7 +457,7 @@ export default defineNitroPlugin((nitroApp: NitroApp) => {
 
     // CardDeleted
     socket.on("cardDeleted", async ({ boardId, card }) => {
-      if (!(await canAccessBoard(socket, boardId))) return;
+      if (!(await canAccessBoard(socket, boardId, "edit"))) return;
       logger.debug(
         `Card ${card.id} wurde auf Board ${boardId} gelöscht (user-${socket.id})`,
       );
@@ -461,7 +473,7 @@ export default defineNitroPlugin((nitroApp: NitroApp) => {
     socket.on(
       "commentCountUpdated",
       async ({ boardId, cardId, commentCount }) => {
-        if (!(await canAccessBoard(socket, boardId))) return;
+        if (!(await canAccessBoard(socket, boardId, "edit"))) return;
         logger.debug(
           `Comment count updated for card ${cardId} on board ${boardId} (user-${socket.id})`,
         );

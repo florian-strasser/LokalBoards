@@ -59,20 +59,25 @@ export default authHandler("POST", "anyone", async ({ event, db }) => {
     const record = rows[0];
     if (!record) return oauthError(event, "invalid_grant", "That code is not valid.");
 
+    // The code is spent by the request that marks it used, in one statement,
+    // so two requests sent with it at the same moment cannot both read it as
+    // fresh and both come away with tokens: one marks it, the other finds it
+    // already marked.
+    //
     // A code offered twice means either a client bug or somebody replaying a
     // stolen one. There is no way to tell them apart, so the safe reading wins:
     // everything that code ever produced is revoked.
-    if (record.usedAt) {
+    const [claimed]: any = await db.execute(
+      "UPDATE `oauth_codes` SET `usedAt` = NOW() WHERE `codeHash` = ? AND `usedAt` IS NULL",
+      [codeHash],
+    );
+    if (!claimed.affectedRows) {
       await db.execute(
         "UPDATE `oauth_tokens` SET `revokedAt` = NOW() WHERE `clientId` = ? AND `userId` = ? AND `revokedAt` IS NULL",
         [record.clientId, record.userId],
       );
       return oauthError(event, "invalid_grant", "That code has already been used.");
     }
-
-    await db.execute("UPDATE `oauth_codes` SET `usedAt` = NOW() WHERE `codeHash` = ?", [
-      codeHash,
-    ]);
 
     if (new Date(record.expiresAt).getTime() < Date.now()) {
       return oauthError(event, "invalid_grant", "That code has expired.");
@@ -123,10 +128,16 @@ export default authHandler("POST", "anyone", async ({ event, db }) => {
     }
 
     // Rotation: the old pair dies as the new one is born, so a refresh token
-    // that leaks is good for one use and its use is visible.
-    await db.execute("UPDATE `oauth_tokens` SET `revokedAt` = NOW() WHERE `id` = ?", [
-      record.id,
-    ]);
+    // that leaks is good for one use and its use is visible. Retired in the
+    // same statement that checks it is still alive, so two refreshes with it
+    // at once get one new pair between them, not one each.
+    const [retired]: any = await db.execute(
+      "UPDATE `oauth_tokens` SET `revokedAt` = NOW() WHERE `id` = ? AND `revokedAt` IS NULL",
+      [record.id],
+    );
+    if (!retired.affectedRows) {
+      return oauthError(event, "invalid_grant", "That refresh token has been revoked.");
+    }
 
     // A refresh may ask for less than it holds, never for more.
     const held = String(record.scope).split(/\s+/).filter(Boolean);

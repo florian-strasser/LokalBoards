@@ -207,3 +207,13 @@ export const passwordResetLimiter = createRateLimiter({
   max: 10,
   windowMs: 15 * 60 * 1000,
 });
+// API keys and OAuth access tokens that turned out wrong, per address. A key
+// is 128 random bits and no number of tries will guess one; this is for the
+// lookups and the log lines of a client that keeps sending a wrong one — a
+// revoked key in an agent's settings, or somebody trying. As with signing in,
+// only failures count, and an address over the limit is turned away before
+// its key is looked up.
+export const credentialLimiter = createRateLimiter({
+  max: 30,
+  windowMs: 15 * 60 * 1000,
+});

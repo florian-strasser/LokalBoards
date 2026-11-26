@@ -2,7 +2,16 @@ import { createReadStream, promises as fs } from "node:fs";
 import { sendRedirect, setHeader } from "h3";
 import { downloadDisposition } from "../../utils/boardExport";
 import { unlinkOrphanedFiles } from "../../utils/cardCleanup";
-import { storedFileName, uploadedFile } from "../../utils/fileUtils";
+import { showsInTab, storedFileName, uploadedFile } from "../../utils/fileUtils";
+
+// The path of a full address, or "" for anything that is not one.
+const pathOf = (value: string) => {
+  try {
+    return /^https?:\/\//i.test(value) ? new URL(value).pathname : "";
+  } catch {
+    return "";
+  }
+};
 
 // The attachment asked for, with access to its card's board decided at `level`.
 async function attachmentOf(
@@ -46,31 +55,37 @@ export default dataHandler({
     // `raw=1` serves the file inline, so it can be shown in a browser tab —
     // e.g. a PDF, whose in-page <iframe> rendering is unreliable on mobile.
     //
-    // `download=1` serves it as a download. Only images and PDFs can be
-    // displayed; a spreadsheet or a Word file can only ever be saved, so the
-    // response says so instead of leaving it to the browser to work out.
+    // `download=1` serves it as a download. Only pictures and PDFs are shown
+    // (see `showsInTab`); anything else is sent to be saved however it is
+    // asked for, under a type that cannot be run. The type stored with an
+    // attachment is what somebody's import or request said it was.
     const data: string = attachment.filedata || "";
-    const filetype = attachment.filetype || "application/octet-stream";
+    const inTab = showsInTab(attachment.filetype);
+    const type = inTab ? String(attachment.filetype).toLowerCase() : "application/octet-stream";
+    setHeader(event, "x-content-type-options", "nosniff");
 
     // A stored file is normally served by /api/uploads, which knows only the
-    // generated storage name and always says `inline`. For a download it is
-    // read here instead, so the response carries the original filename.
-    const stored = storedFileName(data);
+    // generated storage name. For a download it is read here instead, so the
+    // response carries the original filename. Older rows may hold the whole
+    // address of one of the instance's own files.
+    const stored = storedFileName(data) ?? storedFileName(pathOf(data));
     if (stored && wantsDownload) {
       const path = uploadedFile(stored);
       const info = path ? await fs.stat(path).catch(() => null) : null;
       if (!path || !info?.isFile()) fail(404, "Resource not found");
       setHeader(event, "content-length", info.size);
-      setHeader(event, "content-type", filetype);
+      setHeader(event, "content-type", type);
       setHeader(event, "content-disposition", disposition(attachment.filename, false));
       return createReadStream(path);
     }
+    // Only ever to the instance's own file: an address anywhere else — or one
+    // like `//elsewhere`, which a browser takes for another site — is not
+    // followed, so a card cannot send whoever opens its file off the instance.
+    if (stored) return sendRedirect(event, `/api/uploads/${stored}`, 302);
+    if (/^(?:https?:)?\/\/|^\//i.test(data)) fail(404, "Resource not found");
 
-    if (/^https?:\/\//.test(data) || data.startsWith("/")) {
-      return sendRedirect(event, data, 302);
-    }
-    setHeader(event, "content-type", filetype);
-    setHeader(event, "content-disposition", disposition(attachment.filename, !wantsDownload));
+    setHeader(event, "content-type", type);
+    setHeader(event, "content-disposition", disposition(attachment.filename, inTab && !wantsDownload));
     return Buffer.from(data, "base64");
   },
 

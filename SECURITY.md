@@ -1,5 +1,19 @@
 # Security Policy
 
+## Supported Versions
+
+Security fixes are released as a new version of LokalBoards, and only of the
+latest one: older versions do not receive fixes of their own. Keep an instance
+on the latest release — the `latest` tag of the Docker image always is.
+
+| Version        | Supported |
+| -------------- | --------- |
+| Latest release | ✅        |
+| Anything older | ❌        |
+
+How to run an instance safely is described in the
+[security guide](https://www.lokalboards.com/docs/security).
+
 ## Reporting a Vulnerability
 
 If you believe you have discovered a security issue within LokalBoards, please open a new private security vulnerability report through https://github.com/florian-strasser/LokalBoards/security/advisories/new. Alternatively, reach out to me directly over email: info@lokalboards.com. We will then open a [GitHub Security Advisory](https://github.com/florian-strasser/LokalBoards/security/advisories) for tracking the fix on your

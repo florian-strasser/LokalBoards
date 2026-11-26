@@ -6,6 +6,7 @@ import {
   validateAccessToken,
 } from "../utils/oauth";
 import { getApiKeyUser } from "../utils/auth";
+import { blockIfRateLimited, credentialLimiter, recordFailure } from "../utils/rateLimit";
 
 // `/mcp` as an OAuth resource server.
 //
@@ -32,6 +33,17 @@ export default defineEventHandler(async (event) => {
   const bearer = event.headers.get("authorization")?.replace(/^Bearer /i, "");
   const hasKeyHeader = !!event.headers.get("x-api-key");
 
+  // A client sending a wrong key or token over and over is stopped before it
+  // is looked up again (see `credentialLimiter`). One that sends none at all
+  // is a client discovering how to sign in, and is answered as before.
+  const presented = !!bearer || hasKeyHeader;
+  if (presented && blockIfRateLimited(event, credentialLimiter)) {
+    return {
+      error: "too_many_requests",
+      error_description: "Too many requests with a key or token that is not valid. Try again later.",
+    };
+  }
+
   // An OAuth access token arrives in the same header an API key may use, so the
   // order matters only to keep the logs honest: a token tried as a key fails
   // loudly, and the common case should not look like an error.
@@ -56,6 +68,7 @@ export default defineEventHandler(async (event) => {
 
   // Nothing usable. Returning a body from a Nitro middleware ends the request,
   // which is what sends the challenge instead of the MCP handler's own answer.
+  if (presented) recordFailure(event, credentialLimiter);
   setResponseStatus(event, 401);
   setHeader(
     event,

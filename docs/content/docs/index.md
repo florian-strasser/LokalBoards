@@ -123,6 +123,11 @@ NUXT_PUBLIC_TRELLO_API_KEY=
 
 The colours are configurable too — see [Adjust Colors](/docs/adjust-colors).
 
+LokalBoards can only be shown in a frame by itself, never by another site:
+otherwise a page elsewhere could load one of its pages invisibly and catch a
+click meant for its own. A dashboard that embeds LokalBoards from another
+address shows an empty frame.
+
 ## Running from source
 
 If you would rather not use Docker, LokalBoards is an ordinary Nuxt application.

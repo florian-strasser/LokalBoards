@@ -47,15 +47,21 @@ export default authHandler("POST", "anyone", async ({ event, db }) => {
   }
   const user = users[0];
 
+  // The link is good once, and it is spent by the request that deletes it:
+  // two sent with it at the same moment cannot both find it still there and
+  // both set a password.
+  const [spent]: any = await db.execute(
+    "DELETE FROM `verification` WHERE `value` = ? AND `expiresAt` > NOW()",
+    [tokenHash],
+  );
+  if (!spent.affectedRows) fail(400, "INVALID_TOKEN");
+
   // The password of the account's own, local sign-in. An account that signs in
   // through SSO only has none and gets none from a link: the provider stays
   // the only way in (and no link is sent to one, see request-password.ts).
   if (!(await setLocalPassword(db, user.id, newPassword))) {
     fail(400, "INVALID_TOKEN");
   }
-
-  // The link is good once.
-  await db.execute("DELETE FROM `verification` WHERE `value` = ?", [tokenHash]);
 
   // Every session ends, so the new password is needed to get back in.
   await db.execute("DELETE FROM `session` WHERE `userId` = ?", [user.id]);

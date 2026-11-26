@@ -5,6 +5,7 @@ import { createError, setCookie, getCookie } from "h3";
 import { resolveBoardAccess, type BoardAccess } from "./boardAccess";
 import { hashApiKey } from "./apiKey";
 import { logger } from "./logger";
+import { blockIfRateLimited, credentialLimiter, recordFailure } from "./rateLimit";
 
 // The id of a stored row, as it may arrive from a client. Two generations of
 // them exist on an instance that has been running a while: the UUIDs this app
@@ -306,8 +307,15 @@ export async function getApiKeyUser(event: any) {
 export async function requireUploader(event: any): Promise<string> {
   const session = await getUserSession(event);
   if (session?.user?.id) return String(session.user.id);
+  // See `credentialLimiter`.
+  if (blockIfRateLimited(event, credentialLimiter)) {
+    throw createError({ statusCode: 429, statusMessage: "TOO_MANY_REQUESTS" });
+  }
   const key = await getApiKeyUser(event);
   if (!key?.user?.id) {
+    if (event.headers.get("x-api-key") || event.headers.get("authorization")) {
+      recordFailure(event, credentialLimiter);
+    }
     throw createError({ statusCode: 401, statusMessage: "Unauthorized" });
   }
   if (!apiKeyAllowsWrite(key.permissions, event)) {
@@ -337,6 +345,11 @@ const READ_ONLY_KEY: AuthFailure = {
   ok: false,
   status: 403,
   error: "This API key is read-only",
+};
+const TOO_MANY_TRIES: AuthFailure = {
+  ok: false,
+  status: 429,
+  error: "TOO_MANY_REQUESTS",
 };
 
 /**
@@ -368,8 +381,13 @@ export async function resolveUserId(event: any): Promise<UserResolution> {
 
   let userIdFromApiKey: string | null = null;
   if (apiKey) {
+    // See `credentialLimiter`.
+    if (blockIfRateLimited(event, credentialLimiter)) return TOO_MANY_TRIES;
     const data = await verifyApiKey(apiKey);
-    if (data.error) return UNAUTHORIZED;
+    if (data.error) {
+      recordFailure(event, credentialLimiter);
+      return UNAUTHORIZED;
+    }
 
     // A read-only key must be read-only everywhere, not just over MCP. Enforce
     // it at the single choke point every data endpoint goes through, keyed on

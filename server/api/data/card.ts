@@ -1,4 +1,5 @@
 import { readBody } from "h3";
+import { attachmentsFrom } from "../../utils/attachments";
 import { assigneeIdsFrom } from "../../utils/cardAssignees";
 import { archiveCard, cardForBoard, createCard, updateCard } from "../../utils/cards";
 import { isRepeatEvery } from "../../utils/repeat";
@@ -67,7 +68,7 @@ export default dataHandler({
         : undefined;
 
     const added: number[] = [];
-    for (const file of Array.isArray(files) ? files : []) {
+    for (const file of await attachmentsFrom(Array.isArray(files) ? files : [])) {
       const [result] = await db.execute(
         "INSERT INTO attachments (card, filename, filetype, filesize, filedata) VALUES (?, ?, ?, ?, ?)",
         [found.card.id, file.filename, file.filetype, file.filesize, file.filedata],

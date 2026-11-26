@@ -98,15 +98,20 @@ export default defineNuxtConfig({
     mysqlPort: process.env.NUXT_MYSQL_PORT || "",
     mysqlDatabase: process.env.NUXT_MYSQL_DATABASE || "root",
     mysqlUser: process.env.NUXT_MYSQL_USER || "root",
-    mysqlPassword: process.env.NUXT_MYSQL_PASSWORD || "root1234",
+    // No made-up password to fall back on: a database set up without one
+    // would otherwise be tried with whatever stood here (see databaseSetup).
+    mysqlPassword: process.env.NUXT_MYSQL_PASSWORD || "",
     mysqlSsl: process.env.NUXT_MYSQL_SSL || "",
     mysqlSslRejectUnauthorized:
       process.env.NUXT_MYSQL_SSL_REJECT_UNAUTHORIZED || "",
-    emailHost: process.env.NUXT_EMAIL_HOST || "mail.yourserver.de",
+    // Empty unless set: an instance without a mail server sends no mail (see
+    // sendEmail.ts), rather than logging in to a placeholder host that belongs
+    // to somebody else.
+    emailHost: process.env.NUXT_EMAIL_HOST || "",
     emailPort: process.env.NUXT_EMAIL_PORT || 465,
     emailSecure: process.env.NUXT_EMAIL_SECURE || true,
-    emailUser: process.env.NUXT_EMAIL_USER || "contact@yourdomain.com",
-    emailPass: process.env.NUXT_EMAIL_PASS || "password1234",
+    emailUser: process.env.NUXT_EMAIL_USER || "",
+    emailPass: process.env.NUXT_EMAIL_PASS || "",
 
     // --- Single sign-on (OpenID Connect) ---------------------------------
     // Off unless an issuer and a client are configured. See docs/sso.

@@ -291,6 +291,41 @@ try {
   // ------------------------------------------------- 13. keys still work ---
   const [[user]] = await c.query("SELECT id FROM `user` LIMIT 1");
   check("the API key path is untouched", !!user);
+
+  // ------------------------------------------- 14. one code, sent twice at once
+  // Both requests read the code before either marked it used, and both came
+  // away with tokens. Now the marking is the reading.
+  const raced = await fetch(`${BASE}/api/oauth/authorize`, {
+    method: "POST", headers: { cookie, "content-type": "application/json" },
+    body: JSON.stringify({ ...authParams, approve: true }),
+  }).then((r) => r.json());
+  const racedCode = new URL(raced.redirect).searchParams.get("code");
+  const exchange = () => fetch(`${BASE}/api/oauth/token`, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ...tokenBody, code: racedCode }),
+  }).then(async (r) => ({ status: r.status, body: await r.json() }));
+  const both = await Promise.all([exchange(), exchange(), exchange()]);
+  const issued = both.filter((r) => r.body.access_token);
+  check("a code sent three times at once is exchanged once", issued.length === 1,
+    both.map((r) => r.status).join(", "));
+
+  // A code offered again revokes what it gave, so the race above may have
+  // revoked its winner's tokens too. The refresh race starts from a clean pair.
+  const clean = await fetch(`${BASE}/api/oauth/authorize`, {
+    method: "POST", headers: { cookie, "content-type": "application/json" },
+    body: JSON.stringify({ ...authParams, approve: true }),
+  }).then((r) => r.json());
+  const cleanTokens = await fetch(`${BASE}/api/oauth/token`, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ...tokenBody, code: new URL(clean.redirect).searchParams.get("code") }),
+  }).then((r) => r.json());
+  const refreshOnce = () => fetch(`${BASE}/api/oauth/token`, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ grant_type: "refresh_token", client_id: CLIENT_ID, refresh_token: cleanTokens.refresh_token }),
+  }).then(async (r) => ({ status: r.status, body: await r.json() }));
+  const refreshRace = await Promise.all([refreshOnce(), refreshOnce(), refreshOnce()]);
+  check("and its refresh token, sent three times at once, gives one new pair",
+    refreshRace.filter((r) => r.body.access_token).length === 1, refreshRace.map((r) => r.status).join(", "));
 } catch (error) {
   console.error(`\n FAIL  the run stopped early — ${error.message.split("\n")[0]}`);
   failures++;

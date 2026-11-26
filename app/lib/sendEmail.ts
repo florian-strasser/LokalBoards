@@ -22,7 +22,18 @@ const transporter = nodemailer.createTransport({
 // `attachments` is optional and passed straight to nodemailer. The notification
 // mail uses it for inline (cid:) avatars, because avatars uploaded through the
 // profile are stored as data: URIs and most mail clients refuse to render those.
+// Without NUXT_EMAIL_HOST there is nowhere to send to: nothing is sent, and the
+// log says why once rather than with every invitation and every hourly digest.
+let warnedUnconfigured = false;
+
 export const sendEmail = async ({ to, subject, text, attachments = [] }) => {
+  if (!emailHost) {
+    if (!warnedUnconfigured) {
+      logger.warn("No e-mail is sent: NUXT_EMAIL_HOST is not set.");
+      warnedUnconfigured = true;
+    }
+    return null;
+  }
   const mailOptions = {
     from: emailUser,
     to,

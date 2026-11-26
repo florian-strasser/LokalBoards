@@ -1,3 +1,4 @@
+import { importedFileType } from "./attachments";
 import { serverText } from "./serverText";
 
 // A board brought over from another tool, and the one place that writes it.
@@ -192,7 +193,6 @@ export async function writeImportedBoard(
 
   for (const [index, { cardId, file }] of pendingFiles.entries()) {
     let bytes: Buffer | null = null;
-    const type = file.type;
     if (index < MAX_FILES && file.data) {
       bytes = Buffer.from(file.data, "base64");
     }
@@ -206,7 +206,8 @@ export async function writeImportedBoard(
         [
           cardId,
           String(file.name || "attachment").slice(0, NAME_MAX),
-          String(type || "application/octet-stream").slice(0, 100),
+          // What the export says, only where the file bears it out.
+          importedFileType(file.type, bytes),
           bytes.length,
           bytes.toString("base64"),
         ],

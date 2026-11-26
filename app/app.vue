@@ -25,6 +25,15 @@ const language = useState(
     () => useRuntimeConfig().language || "en",
 );
 
+// The instance's colours, over the defaults in main.css. A setting that is not
+// a colour is left out, and the default stays (see `cssColour`).
+const colours = (values: Record<string, unknown>) =>
+    Object.entries(values)
+        .map(([name, value]) => [name, cssColour(value)])
+        .filter(([, value]) => value)
+        .map(([name, value]) => `--color-${name}: ${value};`)
+        .join("\n");
+
 useHead({
     htmlAttrs: {
         lang: language.value,
@@ -39,21 +48,25 @@ useHead({
         {
             innerHTML: `
               :root {
-                --color-primary: ${config.colorPrimary};
-                --color-primary-hover: ${config.colorPrimaryHover};
-                --color-white: ${config.colorWhite};
-                --color-gray: ${config.colorGray};
-                --color-slate: ${config.colorSlate};
-                --color-black: ${config.colorBlack};
-                --color-dark: ${config.colorDark};
+                ${colours({
+                    primary: config.colorPrimary,
+                    "primary-hover": config.colorPrimaryHover,
+                    white: config.colorWhite,
+                    gray: config.colorGray,
+                    slate: config.colorSlate,
+                    black: config.colorBlack,
+                    dark: config.colorDark,
+                })}
               }
               @media (prefers-color-scheme: dark) {
                 :root {
-                  --color-primary: ${config.colorPrimaryDark};
-                  --color-primary-hover: ${config.colorPrimaryHoverDark};
-                  --color-gray: ${config.colorGrayDark};
-                  --color-slate: ${config.colorSlateDark};
-                  --color-dark: ${config.colorDarkDark};
+                  ${colours({
+                      primary: config.colorPrimaryDark,
+                      "primary-hover": config.colorPrimaryHoverDark,
+                      gray: config.colorGrayDark,
+                      slate: config.colorSlateDark,
+                      dark: config.colorDarkDark,
+                  })}
                 }
               }
             `,
